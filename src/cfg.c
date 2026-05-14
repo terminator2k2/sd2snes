@@ -48,7 +48,10 @@ cfg_t CFG_DEFAULT = {
   .sgb_clock_fix = 1,
   .sgb_bios_version = 2,
   .enable_autosave = 1,
-  .enable_autosave_msu1 = 1
+  .enable_autosave_msu1 = 1,
+  .menu_music_enabled = 0,
+  .menu_music_volume = 100,
+  .menu_music_file = {0},
 };
 
 cfg_t CFG;
@@ -150,6 +153,13 @@ int cfg_save() {
   f_printf(&file_handle, "%s: %s\n", CFG_ENABLE_AUTOSAVE, CFG.enable_autosave ? "true" : "false");
   f_printf(&file_handle, "#  %s: Opportunistic Autosave for MSU-1 games\n", CFG_ENABLE_AUTOSAVE_MSU1);
   f_printf(&file_handle, "%s: %s\n", CFG_ENABLE_AUTOSAVE_MSU1, CFG.enable_autosave_msu1 ? "true" : "false");
+  f_puts("\n# Menu background music\n", &file_handle);
+  f_printf(&file_handle, "#  %s: 0=Off, 1=Always (cold+warm boot), 2=Cold (coldboot only)\n", CFG_MENU_MUSIC_ENABLED);
+  f_printf(&file_handle, "%s: %d\n", CFG_MENU_MUSIC_ENABLED, CFG.menu_music_enabled);
+  f_printf(&file_handle, "#  %s: Menu music playback volume (0-100)\n", CFG_MENU_MUSIC_VOLUME);
+  f_printf(&file_handle, "%s: %d\n", CFG_MENU_MUSIC_VOLUME, CFG.menu_music_volume);
+  f_printf(&file_handle, "#  %s: Full path to the SPC file used as menu music\n", CFG_MENU_MUSIC_FILE);
+  f_printf(&file_handle, "%s: %s\n", CFG_MENU_MUSIC_FILE, CFG.menu_music_file);
   file_close();
   return err;
 }
@@ -278,6 +288,18 @@ int cfg_load() {
     }
     if(yaml_get_itemvalue(CFG_ENABLE_AUTOSAVE_MSU1, &tok)) {
       CFG.enable_autosave_msu1 = tok.boolvalue ? 1 : 0;
+    }
+    if(yaml_get_itemvalue(CFG_MENU_MUSIC_ENABLED, &tok)) {
+      CFG.menu_music_enabled = (uint8_t)tok.longvalue;
+      if(CFG.menu_music_enabled > 2) CFG.menu_music_enabled = 2;
+    }
+    if(yaml_get_itemvalue(CFG_MENU_MUSIC_VOLUME, &tok)) {
+      CFG.menu_music_volume = (uint8_t)tok.longvalue;
+      if(CFG.menu_music_volume > 100) CFG.menu_music_volume = 100;
+    }
+    if(yaml_get_itemvalue(CFG_MENU_MUSIC_FILE, &tok)) {
+      strncpy((char*)CFG.menu_music_file, tok.stringvalue, sizeof(CFG.menu_music_file)-1);
+      CFG.menu_music_file[sizeof(CFG.menu_music_file)-1] = 0;
     }
   }
   yaml_file_close();

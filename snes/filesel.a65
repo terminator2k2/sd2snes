@@ -767,6 +767,32 @@ select_spc:
   sta @MCU_PARAM+2
   lda #$00
   sta @MCU_PARAM+3
+; If background music is playing the SPC700 is running user code and
+; will not respond to the IPL handshake.  Do a hardware reset first
+; (like spc_key_b) so apu_ram_init in warmboot puts SPC700 back in
+; IPL state.  MCU_PARAM is in FPGA SRAM and survives warmboot, so
+; the user just re-selects the SPC file after the brief reset.
+  lda music_is_playing
+  beq select_spc_go
+  stz music_is_playing         ; clear in snapshot: no music_is_playing after warmboot
+  lda #$01
+  sta music_skip_restart       ; tell music_start_background to skip this warmboot
+  jsr backup_wram              ; snapshot WRAM (captures the two flags above)
+  php                          ; push P (warmboot's plp will pop this)
+  rep #$20 : .al
+  tsc
+  sta @SAVED_SP                ; save SP for warmboot restoration
+  lda #$fa50
+  sta @WARM_SIGNATURE
+  eor #$ffff
+  sta @WARM_COMPLEMENT
+  sep #$20 : .as
+  sei
+  stz $2100
+  lda #CMD_RESET
+  sta @MCU_CMD
+- bra -                        ; wait for hardware reset by MCU
+select_spc_go:
   lda #CMD_LOADSPC
   sta @MCU_CMD
 wait_spc:
@@ -853,6 +879,24 @@ ctx_is_parent
 ctx_is_dir
   bra open_context_menu_cont
 ctx_is_spc
+; "save" selected file path to MCU_PARAM in case we need to send it there later
+  dey
+  rep #$20 : .al
+  lda [dirptr_addr], y
+  and #$00ff
+  sta @MCU_PARAM+6
+  dey
+  dey
+  lda [dirptr_addr], y
+  sta @MCU_PARAM+4
+  lda #!FILESEL_CWD
+  sta @MCU_PARAM
+  sep #$20 : .as
+  lda #^FILESEL_CWD
+  sta @MCU_PARAM+2
+  lda #$00
+  sta @MCU_PARAM+3
+  jsr filesel_contextmenu_spc
   bra open_context_menu_cont
 
 add_selected_file_to_favorites:
@@ -1222,6 +1266,37 @@ set_favorite_as_autoboot_rom:
   lda #$00
   sta @SNES_CMD
   lda #CMD_SET_AUTOBOOT_FAV
+  sta @MCU_CMD
+; wait for ACK/NACK
+- lda @SNES_CMD
+  cmp #$55
+; success
+  beq +
+  cmp #$aa
+; failure
+  beq +
+  bra -
++ lda #$55
+  sta @MCU_CMD
+  jsr pop_window
+  plb
+  plp
+  rtl
+
+set_as_menu_music:
+; have MCU save the currently selected SPC file as the menu background music
+; the file path should already have been saved to MCU_PARAM before calling
+; this routine (done by open_context_menu / ctx_is_spc)
+  php
+  phb
+  sep #$20 : .as
+  lda #$01
+  jsr hide_cursor
+  jsr draw_loading_window
+  jsr waitblank
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_SET_MENU_MUSIC
   sta @MCU_CMD
 ; wait for ACK/NACK
 - lda @SNES_CMD
