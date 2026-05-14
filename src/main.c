@@ -270,6 +270,7 @@ int main(void) {
     }
     STM.autoboot_enabled = cfg_is_autoboot_enabled();
     status_load_to_menu();
+    STM.reset_to_menu_active = 0;  /* SRAM now holds the flag for the SNES; zero in RAM so later status_load_to_menu() calls don't re-broadcast it */
 
     uint8_t cmd = 0;
     uint64_t btime = 0;
@@ -533,6 +534,7 @@ int main(void) {
       }
       uint8_t resetState = get_snes_reset_state();
       if(resetState == SNES_RESET_LONG) {
+        STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
         prepare_reset();
         break;
       } else {
@@ -560,6 +562,7 @@ int main(void) {
                 break;
               case SNES_CMD_RESET_TO_MENU:
                 usb_cmd = 0;
+                STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
                 prepare_reset();
                 goto snes_loop_out;
               case SNES_CMD_SAVESTATE:

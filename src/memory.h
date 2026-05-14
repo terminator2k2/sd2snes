@@ -60,6 +60,7 @@ extern uint32_t slotb_ramsize_bytes;
 #define SRAM_SNES_STATUS_ADDR        (0xFF1110L)
 #define SRAM_SYSINFO_ADDR            (0xFF1200L)
 #define SRAM_LASTGAME_ADDR           (0xFF1420L)
+#define SRAM_LASTGAME_DIR_ADDR       (0xFF1F00L)
 #define SRAM_FAVORITEGAMES_ADDR      (0xFF4000L)
 #define SRAM_IPS_LIST_ADDR           (0xFF5000L)
 #define SRAM_SCRATCHPAD              (0xFFFF00L)
