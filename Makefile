@@ -20,7 +20,7 @@ FPGAPATH := verilog
 
 MK3EXT := bi3
 
-MK3CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb
+MK3CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb spc7110
 
 
 MK3FPGA := $(foreach C,$(MK3CORES),$(FPGAPATH)/sd2snes_$C/fpga_$C.$(MK3EXT))
