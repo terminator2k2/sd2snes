@@ -50,7 +50,8 @@
 #define SNES_CMD_LOAD_AUTOBOOT       (0x18) /* boot into the stored autoboot ROM */
 #define SNES_CMD_SET_SLOTB_ROM       (0x19) /* set Slot B companion cart for Sufami Turbo (non-persistent) */
 #define SNES_CMD_QUERY_IPS_PATCHES   (0x1A) /* find IPS patches for selected ROM */
-
+#define SNES_CMD_DELETE_FILE         (0x1B) /* delete selected file */
+#define SNES_CMD_DELETE_SRM          (0x1C) /* delete SRM save file for selected ROM */
 
 #define SNES_CMD_SAVESTATE           (0x40)
 #define SNES_CMD_LOADSTATE           (0x41)
