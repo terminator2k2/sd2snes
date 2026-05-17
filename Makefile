@@ -8,7 +8,7 @@ STMMCUPATH := $(MCUSRC)/obj-mk3-stm32
 
 
 MK3MCU := firmware.im3
-STMMCU := firmware.stm
+
 
 
 SAVESTATEPATH := savestate
@@ -72,6 +72,7 @@ release: version bsxpage
 	cp $(MK3FPGA) $(TARGET)
 	cp $(MK3MCUPATH)/$(MK3MCU) $(TARGET)
 	cp $(STMMCUPATH)/$(STMMCU) $(TARGET)
+	
 	cp $(MENUPATH)/$(MK3MENU) $(TARGET)
 	cp $(SAVESTATEPATH)/$(SAVESTATEFILES) $(TARGET)
 	cd $(TARGETPARENT) && zip -r sd2snes_firmware_v$(CONFIG_VERSION).zip sd2snes

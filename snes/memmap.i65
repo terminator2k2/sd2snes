@@ -60,6 +60,7 @@
 #define ST_SNES_ADDR                $FF1110
 #define SYSINFO_BLK                 $FF1200
 #define LAST_GAME                   $FF1420
+#define LAST_GAME_DIR               $FF1F00
 #define WRAM_BAK                    $FF2000
 #define FAVORITE_GAMES              $FF4000
 
@@ -90,6 +91,14 @@
 #define CMD_SET_AUTOBOOT_FAV        $16 /* set autoboot from favorites (index in MCU_PARAM) */
 #define CMD_CLR_AUTOBOOT_ROM        $17 /* clear autoboot ROM setting */
 #define CMD_LOAD_AUTOBOOT           $18 /* trigger autoboot at cold boot */
+#define CMD_SET_SLOTB_ROM           $19 /* set Slot B companion cart for Sufami Turbo (non-persistent) */
+#define CMD_QUERY_IPS_PATCHES       $1A /* find IPS patches for selected ROM */
+#define IPS_LIST                    $FF5000  /* IPS patch list written by MCU */
+#define IPS_NAME_LEN                64       /* bytes per display name entry */
+#define IPS_MAX_PATCHES             8        /* maximum patches per ROM */
+#define CMD_DELETE_FILE             $1B /* delete selected file */
+#define CMD_DELETE_SRM              $1C /* delete SRM save file for selected ROM */
+
 #define CMD_SAVESTATE               $40
 #define CMD_LOADSTATE               $41
 #define CMD_MCU_RDY                 $55
@@ -152,6 +161,7 @@
 #define ST_PAIRMODE                 ST_MCU_ADDR+$0002
 #define ST_NUM_FAVORITE_GAMES       ST_MCU_ADDR+$0003
 #define ST_AUTOBOOT_ENABLED         ST_MCU_ADDR+$0004
+#define ST_RESET_TO_MENU_ACTIVE     ST_MCU_ADDR+$0005
 
 #define ST_IS_U16                   ST_SNES_ADDR+$0000
 #define ST_U16_CFG                  ST_SNES_ADDR+$0001
@@ -180,6 +190,7 @@
 #define TYPE_ROM                    $01
 #define TYPE_SRM                    $02
 #define TYPE_SPC                    $03
+#define TYPE_ROM_ST                 $07
 #define TYPE_IPS                    $04
 #define TYPE_CHT                    $05
 #define TYPE_SKIN                   $06
