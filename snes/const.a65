@@ -259,7 +259,7 @@ mdesc_browser_screensaver         .byt "Fade-out the screen after some time", 0
 mdesc_browser_screensaver_timeout .byt "Set time after which to fade the screen", 0
 mdesc_browser_ledbright           .byt "Change brightness of LEDs", 0
 mdesc_ingame_cheats               .byt "Whether to start out with cheats enabled. Can be changed using in-game buttons", 0
-mdesc_ingame_shortreset           .byt "Go back to menu on short reset if enabled", 0
+mdesc_ingame_shortreset           .byt "Go back to menu on short reset (Off/On/Folder/Rom). Folder: return to last game folder. Rom: also pre-select the ROM.", 0
 mdesc_ingame_enable               .byt "Required for in-game buttons and 7E/7F cheats", 0
 mdesc_ingame_buttons              .byt "Enable in-game buttons (reset, en/disable cheats", 127, 128, "). Requires in-game hook to be enabled.", 0
 mdesc_ingame_holdoff              .byt "Wait 10 seconds before enabling hook (helps some games boot with hook enabled)", 0
@@ -293,6 +293,14 @@ mdesc_filesel_context_add_to_favorites .byt "Add the selected file to favorites"
 
 text_filesel_context_set_as_autoboot .byt "Set as autoboot", 0
 mdesc_filesel_context_set_as_autoboot .byt "Boot this ROM automatically on next power-on (hold START to cancel)", 0
+text_filesel_context_set_as_slotb .byt "Set as Slot B", 0
+mdesc_filesel_context_set_as_slotb .byt "Load this .ST ROM as the Sufami Turbo Slot B companion cart", 0
+
+text_filesel_context_delete_file .byt "Delete", 0
+mdesc_filesel_context_delete_file .byt "Delete the selected file", 0
+
+text_filesel_context_delete_srm .byt "Delete save file", 0
+mdesc_filesel_context_delete_srm .byt "Delete the SRM save file for this ROM", 0
 
 text_filesel_context_cheats .byt "Cheats", 0
 mdesc_filesel_context_cheats .byt "View, enable or disable cheats from this ROM's YAML file", 0
@@ -320,6 +328,8 @@ text_on_p1      .byt "On: P1", 0
 text_on_p2      .byt "On: P2", 0
 text_on         .byt "On", 0
 text_off        .byt "Off", 0
+text_nav_folder .byt "Folder", 0
+text_nav_rom    .byt "Rom", 0
 text_enabled    .byt "Enabled", 0
 text_disabled   .byt "Disabled", 0
 text_normal     .byt "Normal", 0
@@ -408,6 +418,8 @@ loading_win_w   .byt 34
 loading_win_h   .byt 1
 
 text_cheat      .byt "Cheats for ", 0
+text_ips_header .byt "Patches", 0
+text_ips_nopatch .byt "[No patch]", 0
 cheat_win_x     .byt 6
 cheat_win_y     .byt 11
 cheat_win_w     .byt 52
