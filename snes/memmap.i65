@@ -77,9 +77,6 @@
 #define CMD_FPGA_RECONF             $0B
 #define CMD_LOAD_CHT                $0C
 #define CMD_SAVE_CHT                $0D
-#define CMD_TOGGLE_CHT              $19 /* MCU_PARAM low byte: cheat index. MCU XORs the flag bit in PSRAM record. */
-#define CMD_LOAD_CHT_FAV            $1A /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_load. */
-#define CMD_SAVE_CHT_FAV            $1B /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_save. */
 #define CMD_SAVE_CFG                $0E
 #define CMD_SET_CFG                 $0F
 #define CMD_SELECTROM               $10 /* TODO WIP */
@@ -98,6 +95,9 @@
 #define IPS_MAX_PATCHES             8        /* maximum patches per ROM */
 #define CMD_DELETE_FILE             $1B /* delete selected file */
 #define CMD_DELETE_SRM              $1C /* delete SRM save file for selected ROM */
+#define CMD_TOGGLE_CHT              $1D /* MCU_PARAM low byte: cheat index. MCU XORs the flag bit in PSRAM record. */
+#define CMD_LOAD_CHT_FAV            $1E /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_load. */
+#define CMD_SAVE_CHT_FAV            $20 /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_save. */
 
 #define CMD_SAVESTATE               $40
 #define CMD_LOADSTATE               $41
