@@ -41,6 +41,7 @@
 #define SNES_CMD_LOAD_CHT            (0x0c)
 #define SNES_CMD_SAVE_CHT            (0x0d)
 #define SNES_CMD_SAVE_CFG            (0x0e)
+#define SNES_CMD_TOGGLE_CHT          (0x19) /* MCU_PARAM low byte: cheat index. XORs flag bit in PSRAM record. */
 #define SNES_CMD_LED_BRIGHTNESS      (0x12)
 #define SNES_CMD_ADD_FAVORITE_ROM    (0x13)
 #define SNES_CMD_REMOVE_FAVORITE_ROM (0x14)
@@ -48,6 +49,8 @@
 #define SNES_CMD_SET_AUTOBOOT_FAV    (0x16) /* set autoboot from favorites list (index in MCU_PARAM) */
 #define SNES_CMD_CLR_AUTOBOOT_ROM    (0x17) /* clear autoboot ROM setting */
 #define SNES_CMD_LOAD_AUTOBOOT       (0x18) /* boot into the stored autoboot ROM */
+#define SNES_CMD_LOAD_CHT_FAV        (0x1a) /* MCU_PARAM low byte: favorite index. Resolve path via cfg_get_favorite_game then cheat_yaml_load. */
+#define SNES_CMD_SAVE_CHT_FAV        (0x1b) /* MCU_PARAM low byte: favorite index. Resolve path via cfg_get_favorite_game then cheat_yaml_save. */
 
 #define SNES_CMD_SAVESTATE           (0x40)
 #define SNES_CMD_LOADSTATE           (0x41)
