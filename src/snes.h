@@ -52,6 +52,10 @@
 #define SNES_CMD_QUERY_IPS_PATCHES   (0x1A) /* find IPS patches for selected ROM */
 #define SNES_CMD_DELETE_FILE         (0x1B) /* delete selected file */
 #define SNES_CMD_DELETE_SRM          (0x1C) /* delete SRM save file for selected ROM */
+#define SNES_CMD_TOGGLE_CHT          (0x1D) /* MCU_PARAM low byte: cheat index. XORs flag bit in PSRAM record. */
+#define SNES_CMD_LOAD_CHT_FAV        (0x1E) /* MCU_PARAM low byte: favorite index. Resolve path via cfg_get_favorite_game then cheat_yaml_load. */
+#define SNES_CMD_SAVE_CHT_FAV        (0x20) /* MCU_PARAM low byte: favorite index. Resolve path via cfg_get_favorite_game then cheat_yaml_save. */
+
 
 #define SNES_CMD_SAVESTATE           (0x40)
 #define SNES_CMD_LOADSTATE           (0x41)
