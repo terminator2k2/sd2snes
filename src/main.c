@@ -530,7 +530,7 @@ int main(void) {
              holds the favorite index; we resolve the path the same
              way LOADFAVORITE / SET_AUTOBOOT_FAV do, then reuse the
              standard cheat_yaml_load flow. */
-          cfg_get_favorite_game(file_lfn, snes_get_mcu_param() & 0xff);
+          cfg_get_listed_game(FAVORITES_FILE, file_lfn, snes_get_mcu_param() & 0xff);
           printf("Load cheats for favorite: %s\n", file_lfn);
           cheat_yaml_load(file_lfn);
           cmd=0; /* stay in menu loop */
@@ -540,7 +540,7 @@ int main(void) {
              LOAD_CHT_FAV; the SNES side rewrites MCU_PARAM with the
              favorite index before sending this command, because the
              toggle handler clobbers it during normal menu use. */
-          cfg_get_favorite_game(file_lfn, snes_get_mcu_param() & 0xff);
+          cfg_get_listed_game(FAVORITES_FILE, file_lfn, snes_get_mcu_param() & 0xff);
           printf("Save cheats for favorite: %s\n", file_lfn);
           cheat_yaml_save(file_lfn);
           cmd=0; /* stay in menu loop */
