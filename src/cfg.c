@@ -345,13 +345,14 @@ int cfg_add_listed_game(const uint8_t *listfilename, uint8_t *fn, bool evict_old
     }
   }
   file_close();
-
-  if(!evict_oldest) {
+  
+   if(!evict_oldest) {
     if(index > 9 + found) {
       //List is full and game is not already in list, refuse to add it
       return 1;
     }
   }
+
 
   file_open(listfilename, FA_CREATE_ALWAYS | FA_WRITE);
   /* always put new entry on top of list */
@@ -428,6 +429,7 @@ uint8_t cfg_dump_listed_games_for_snes(const uint8_t *listfilename, uint32_t add
     f_gets(fntmp, 255, &file_handle);
     sram_writestrn(strrchr((const char*)fntmp, '/')+1, address+256*index, 256);
   }
+  
   file_close();
   return (uint8_t) index;
 }

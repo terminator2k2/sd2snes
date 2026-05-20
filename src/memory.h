@@ -31,6 +31,8 @@
 #include "smc.h"
 
 extern char current_filename[];
+extern char slotb_filename[];
+extern uint32_t slotb_ramsize_bytes;
 
 #define MENU_ADDR_BRAM_SRC           (0xFF00)
 
@@ -42,7 +44,11 @@ extern char current_filename[];
 #define SRAM_DB_ADDR                 (0xC80000L)
 
 #define SRAM_NUM_CHEATS              (0xCFFFFEL)
-#define SRAM_CHEAT_ADDR              (0xD00000L) /* banks D0-DF for 2048 cheats per YML file */
+#define SRAM_CHEAT_ADDR              (0xD00000L) /* up to 512 cheat records (512 bytes each), spans banks D0..D3 */
+#define SRAM_CHEAT_CODE_STRINGS_ADDR (0xD40000L) /* per-code display strings, 12 bytes each. cheat_idx*512 + code_idx*12. Spans D4..D7, leaving D0..D3 free for up to 512 cheat records. */
+
+#define SRAM_CHEAT_TITLE_ADDR        (0xD80000L) /* 256 bytes "Cheats for <game>" null-terminated, in cheat region past any plausible cheat count */
+#define SRAM_CHEAT_FLAGS_ADDR        (0xFF0500L) /* 512 bytes BSRAM mirror of cheat flag byte 0 (cheats 0..511). SNES reads/writes here for instant visual toggle. */
 
 #define SRAM_SKIN_ADDR               (0xF00000L)
 
@@ -59,6 +65,7 @@ extern char current_filename[];
 #define SRAM_SYSINFO_ADDR            (0xFF1200L)
 #define SRAM_LASTGAME_ADDR           (0xFF1420L)
 #define SRAM_FAVORITEGAMES_ADDR      (0xFF4000L)
+#define SRAM_IPS_LIST_ADDR           (0xFF5000L)
 #define SRAM_SCRATCHPAD              (0xFFFF00L)
 #define SRAM_DIRID                   (0xFFFFF0L)
 #define SRAM_RELIABILITY_SCORE       (0x100)
@@ -102,6 +109,7 @@ uint16_t sram_writestrn(void* buf, uint32_t addr, uint16_t size);
 void sram_readlongblock(uint32_t* buf, uint32_t addr, uint16_t count);
 uint16_t sram_writeblock(void* buf, uint32_t addr, uint16_t size);
 void save_srm(uint8_t* filename, uint32_t sram_size, uint32_t base_addr);
+extern uint8_t current_ips_srm_source[256];
 void save_sram(uint8_t* filename, uint32_t sram_size, uint32_t base_addr);
 uint32_t calc_sram_crc(uint32_t base_addr, uint32_t size, uint32_t crc);
 uint16_t calc_sram_sum(uint32_t base_addr, uint32_t size);

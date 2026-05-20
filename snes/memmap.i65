@@ -46,6 +46,9 @@
 
 #define NUM_CHEATS                  $CFFFFE
 #define CHEAT_ADDR                  $D00000
+#define CHEAT_CODE_STRINGS          $D40000 /* per-code display strings, 12 bytes each. cheat_idx*512 + code_idx*12. Spans banks D4..D7 to leave D0..D3 free for up to 512 cheat records (512 bytes each). */
+#define CHEAT_TITLE                 $D80000 /* 256 bytes "Cheats for <game>" null-terminated, in cheat region past any plausible cheat count */
+#define CHEAT_FLAGS                 $FF0500 /* 512 bytes BSRAM mirror of cheat flag byte 0 (cheats 0..511). SNES reads/writes here for instant visual toggle, MCU also keeps it in sync. */
 
 #define SPC_DATA                    $FD0000
 #define SPC_HEADER                  $FE0000
@@ -87,6 +90,18 @@
 #define CMD_SET_AUTOBOOT_RECENT     $19
 #define CMD_CLR_AUTOBOOT_ROM        $1a /* clear autoboot ROM setting */
 #define CMD_LOAD_AUTOBOOT           $1b /* trigger autoboot at cold boot */
+#define CMD_DELETE_SRM              $1C /* delete SRM save file for selected ROM */
+#define CMD_TOGGLE_CHT              $1D /* MCU_PARAM low byte: cheat index. MCU XORs the flag bit in PSRAM record. */
+#define CMD_LOAD_CHT_FAV            $1E /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_load. */
+#define CMD_SAVE_CHT_FAV            $20 /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_save. */
+#define CMD_SET_SLOTB_ROM           $21 /* set Slot B companion cart for Sufami Turbo (non-persistent) */
+#define CMD_QUERY_IPS_PATCHES       $22 /* find IPS patches for selected ROM */
+#define CMD_DELETE_FILE             $23 /* delete selected file */
+
+#define IPS_LIST                    $FF5000  /* IPS patch list written by MCU */
+#define IPS_NAME_LEN                64       /* bytes per display name entry */
+#define IPS_MAX_PATCHES             8        /* maximum patches per ROM */
+
 #define CMD_SAVESTATE               $40
 #define CMD_LOADSTATE               $41
 #define CMD_MCU_RDY                 $55
@@ -177,6 +192,7 @@
 #define TYPE_ROM                    $01
 #define TYPE_SRM                    $02
 #define TYPE_SPC                    $03
+#define TYPE_ROM_ST                 $07
 #define TYPE_IPS                    $04
 #define TYPE_CHT                    $05
 #define TYPE_SKIN                   $06

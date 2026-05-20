@@ -51,6 +51,13 @@
 #define SNES_CMD_SET_AUTOBOOT_RECENT (0x19) /* set autoboot from recent games list (index in MCU_PARAM) */
 #define SNES_CMD_CLR_AUTOBOOT_ROM    (0x1a) /* clear autoboot ROM setting */
 #define SNES_CMD_LOAD_AUTOBOOT       (0x1b) /* boot into the stored autoboot ROM */
+#define SNES_CMD_DELETE_SRM          (0x1C) /* delete SRM save file for selected ROM */
+#define SNES_CMD_TOGGLE_CHT          (0x1D) /* MCU_PARAM low byte: cheat index. XORs flag bit in PSRAM record. */
+#define SNES_CMD_LOAD_CHT_FAV        (0x1E) /* MCU_PARAM low byte: favorite index. Resolve path via cfg_get_favorite_game then cheat_yaml_load. */
+#define SNES_CMD_SAVE_CHT_FAV        (0x20) /* MCU_PARAM low byte: favorite index. Resolve path via cfg_get_favorite_game then cheat_yaml_save. */
+#define SNES_CMD_SET_SLOTB_ROM       (0x21) /* set Slot B companion cart for Sufami Turbo (non-persistent) */
+#define SNES_CMD_QUERY_IPS_PATCHES   (0x22) /* find IPS patches for selected ROM */
+#define SNES_CMD_DELETE_FILE         (0x23) /* delete selected file */
 
 #define SNES_CMD_SAVESTATE           (0x40)
 #define SNES_CMD_LOADSTATE           (0x41)
