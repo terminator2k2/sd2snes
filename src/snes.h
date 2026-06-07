@@ -58,6 +58,7 @@
 #define SNES_CMD_SET_SLOTB_ROM       (0x21) /* set Slot B companion cart for Sufami Turbo (non-persistent) */
 #define SNES_CMD_QUERY_IPS_PATCHES   (0x22) /* find IPS patches for selected ROM */
 #define SNES_CMD_DELETE_FILE         (0x23) /* delete selected file */
+#define SNES_CMD_LOAD_MENU_SPC       (0x24) /* stage /sd2snes/menu.spc for background menu music */
 
 #define SNES_CMD_SAVESTATE           (0x40)
 #define SNES_CMD_LOADSTATE           (0x41)
