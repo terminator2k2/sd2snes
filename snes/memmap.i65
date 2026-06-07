@@ -16,6 +16,11 @@
 #define WARM_SIGNATURE              $002AFD
 #define WARM_COMPLEMENT             $002AF9
 #define SAVED_SP                    $002AFB
+#define BGM_STATE                   $002AF7 /* fork: menu-music runtime state. Lives in the $2A
+                                              FPGA region, which is NOT cleared by clear_wram and
+                                              survives a reset, so coldboot explicitly zeroes it
+                                              (main.a65) -- every non-warm reset lands in coldboot.
+                                              0=not loaded (reload), 1=playing, 2=tried-no-spc. */
 
 #define BRAM_PAYLOAD                $002A10
 #define BRAM_RETURN_VECTOR          $002A6C
@@ -97,6 +102,7 @@
 #define CMD_SET_SLOTB_ROM           $21 /* set Slot B companion cart for Sufami Turbo (non-persistent) */
 #define CMD_QUERY_IPS_PATCHES       $22 /* find IPS patches for selected ROM */
 #define CMD_DELETE_FILE             $23 /* delete selected file */
+#define CMD_LOAD_MENU_SPC           $24 /* stage /sd2snes/menu.spc for background menu music */
 
 #define IPS_LIST                    $FF5000  /* IPS patch list written by MCU */
 #define IPS_NAME_LEN                64       /* bytes per display name entry */
@@ -156,6 +162,7 @@
 #define CFG_SHOW_TRIBUTE                CFG_ADDR+$00B3
 #define CFG_ENABLE_AUTOSAVE             CFG_ADDR+$00B4
 #define CFG_ENABLE_AUTOSAVE_MSU1        CFG_ADDR+$00B5
+#define CFG_ENABLE_MENU_MUSIC           CFG_ADDR+$00B9
 
 #define MENU_ENTRY_SIZE             23
 
