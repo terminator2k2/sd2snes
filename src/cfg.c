@@ -48,7 +48,8 @@ cfg_t CFG_DEFAULT = {
   .sgb_clock_fix = 1,
   .sgb_bios_version = 2,
   .enable_autosave = 1,
-  .enable_autosave_msu1 = 1
+  .enable_autosave_msu1 = 1,
+  .enable_menu_music = 1
 };
 
 cfg_t CFG;
@@ -150,6 +151,8 @@ int cfg_save() {
   f_printf(&file_handle, "%s: %s\n", CFG_ENABLE_AUTOSAVE, CFG.enable_autosave ? "true" : "false");
   f_printf(&file_handle, "#  %s: Opportunistic Autosave for MSU-1 games\n", CFG_ENABLE_AUTOSAVE_MSU1);
   f_printf(&file_handle, "%s: %s\n", CFG_ENABLE_AUTOSAVE_MSU1, CFG.enable_autosave_msu1 ? "true" : "false");
+  f_printf(&file_handle, "\n#  %s: Play background music (/sd2snes/menu.spc) in the menu\n", CFG_ENABLE_MENU_MUSIC);
+  f_printf(&file_handle, "%s: %s\n", CFG_ENABLE_MENU_MUSIC, CFG.enable_menu_music ? "true" : "false");
   file_close();
   return err;
 }
@@ -278,6 +281,9 @@ int cfg_load() {
     }
     if(yaml_get_itemvalue(CFG_ENABLE_AUTOSAVE_MSU1, &tok)) {
       CFG.enable_autosave_msu1 = tok.boolvalue ? 1 : 0;
+    }
+    if(yaml_get_itemvalue(CFG_ENABLE_MENU_MUSIC, &tok)) {
+      CFG.enable_menu_music = tok.boolvalue ? 1 : 0;
     }
   }
   yaml_file_close();
