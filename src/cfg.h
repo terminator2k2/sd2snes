@@ -49,6 +49,7 @@
 #define CFG_SGB_BIOS_VERSION             ("SGBBiosVersion")
 #define CFG_ENABLE_AUTOSAVE              ("EnableAutoSave")
 #define CFG_ENABLE_AUTOSAVE_MSU1         ("EnableMSU1AutoSave")
+#define CFG_ENABLE_MENU_MUSIC            ("EnableMenuMusic")
 
 typedef enum {
   VIDMODE_60 = 0,
@@ -96,6 +97,7 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
   uint8_t  sgb_bios_version;        /* SGB bios firmware version (defined number loads: sgbX_boot.bin and sgbX_snes.bin) */
   uint8_t  enable_autosave;         /* enable automatic saving when SRAM contents change */
   uint8_t  enable_autosave_msu1;    /* enable opportunistic auto saving when SRAM contents change for MSU1 games */
+  uint8_t  enable_menu_music;       /* play background menu music (/sd2snes/menu.spc) */
 } cfg_t;
 
 int cfg_save(void);
