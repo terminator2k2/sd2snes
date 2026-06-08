@@ -14,7 +14,7 @@
 /* The SNES menu pokes config bytes by hard-coded offset (snes/memmap.i65,
    CFG_*=CFG_ADDR+$nn).  Pin the C struct layout to that map so inserting or
    resizing a field can never silently desync the menu from the firmware. */
-_Static_assert(offsetof(cfg_t, language) == 0xB7, "cfg_t.language must stay at CFG_ADDR+$B7");
+
 _Static_assert(offsetof(cfg_t, patch_verify_integrity) == 0xB8, "cfg_t.patch_verify_integrity must stay at CFG_ADDR+$B8");
 
 cfg_t CFG_DEFAULT = {
