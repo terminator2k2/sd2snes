@@ -162,6 +162,7 @@
 #define CFG_SHOW_TRIBUTE                CFG_ADDR+$00B3
 #define CFG_ENABLE_AUTOSAVE             CFG_ADDR+$00B4
 #define CFG_ENABLE_AUTOSAVE_MSU1        CFG_ADDR+$00B5
+#define CFG_PATCH_VERIFY_INTEGRITY      CFG_ADDR+$00B8
 #define CFG_ENABLE_MENU_MUSIC           CFG_ADDR+$00B9
 
 #define MENU_ENTRY_SIZE             23
