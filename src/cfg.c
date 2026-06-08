@@ -57,7 +57,7 @@ cfg_t CFG_DEFAULT = {
   .enable_autosave = 1,
   .enable_autosave_msu1 = 1,
   .enable_menu_music = 1,
-  .patch_verify_integrity = 1
+  .patch_verify_integrity = 0
 };
 
 cfg_t CFG;
