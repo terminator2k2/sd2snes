@@ -56,6 +56,8 @@ ips_select_file:
     lda #$00
     pha
     plb                         ; DB = $00 for MCU port access
+    jsr cover_sync_before_cmd   ; drain any in-flight CMD_LOAD_COVER first so the
+                                ; query's $55 isn't mistaken for the cover's ACK
     jsr draw_loading_window     ; push + display loading indicator
     lda #$00
     sta @SNES_CMD               ; clear ready flag so WRAM_WAIT_MCU does not
