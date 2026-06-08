@@ -96,10 +96,13 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
   uint8_t  sgb_spr_increase;        /* SGB increase number of supported visible sprites */
   uint8_t  sgb_clock_fix;           /* SGB timing/clock (true: original/sgb2, false: snes/sgb1) */
   uint8_t  sgb_bios_version;        /* SGB bios firmware version (defined number loads: sgbX_boot.bin and sgbX_snes.bin) */
+  uint8_t  show_tribute;            /* reserved: keeps cfg_t aligned with the menu's CFG offset map (CFG_SHOW_TRIBUTE @ $B3) */
   uint8_t  enable_autosave;         /* enable automatic saving when SRAM contents change */
   uint8_t  enable_autosave_msu1;    /* enable opportunistic auto saving when SRAM contents change for MSU1 games */
-  uint8_t  enable_menu_music;       /* play background menu music (/sd2snes/menu.spc) */
+  uint8_t  _pad_b6;
+  uint8_t  _pad_b7;
   uint8_t  patch_verify_integrity;  /* CFG @ $B8: re-read+CRC the patched ROM after IPS/BPS (slow) */
+  uint8_t  enable_menu_music;       /* play background menu music (/sd2snes/menu.spc) */
 } cfg_t;
 
 int cfg_save(void);
