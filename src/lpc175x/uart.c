@@ -26,6 +26,7 @@ static void cdc_lb_flush(void) {
 }
 #endif
 
+
 static uint8_t uart_lookupratio(float f_fr) {
   uint16_t errors[72]={0,67,71,77,83,91,100,111,125,
                        133,143,154,167,182,200,214,222,231,
