@@ -49,6 +49,8 @@
 #define CFG_SGB_BIOS_VERSION             ("SGBBiosVersion")
 #define CFG_ENABLE_AUTOSAVE              ("EnableAutoSave")
 #define CFG_ENABLE_AUTOSAVE_MSU1         ("EnableMSU1AutoSave")
+#define CFG_ENABLE_MENU_MUSIC            ("EnableMenuMusic")
+#define CFG_PATCH_VERIFY_INTEGRITY       ("PatchVerifyIntegrity")
 
 typedef enum {
   VIDMODE_60 = 0,
@@ -77,7 +79,7 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
   uint8_t  onechip_transient_fixes; /* override register 2100 bits 3-0 */
   uint8_t  brightness_limit;        /* limit brightness set by register 2100 */
   uint8_t  gsu_speed;               /* GSU speed (0: original, 1: no waitstates */
-  uint8_t  reset_to_menu;           /* Go back to menu on short reset */
+  uint8_t  reset_to_menu;           /* Go back to menu on short reset (0=off, 1=on, 2=folder, 3=rom) */
   uint8_t  led_brightness;          /* LED brightness (0..15) */
   uint8_t  enable_cheats;           /* initial cheat enable state */
   uint8_t  reset_patch;             /* enable reset patch */
@@ -94,8 +96,13 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
   uint8_t  sgb_spr_increase;        /* SGB increase number of supported visible sprites */
   uint8_t  sgb_clock_fix;           /* SGB timing/clock (true: original/sgb2, false: snes/sgb1) */
   uint8_t  sgb_bios_version;        /* SGB bios firmware version (defined number loads: sgbX_boot.bin and sgbX_snes.bin) */
+  uint8_t  show_tribute;            /* reserved: keeps cfg_t aligned with the menu's CFG offset map (CFG_SHOW_TRIBUTE @ $B3) */
   uint8_t  enable_autosave;         /* enable automatic saving when SRAM contents change */
   uint8_t  enable_autosave_msu1;    /* enable opportunistic auto saving when SRAM contents change for MSU1 games */
+  uint8_t  _pad_b6;
+  uint8_t  _pad_b7;
+  uint8_t  patch_verify_integrity;  /* CFG @ $B8: re-read+CRC the patched ROM after IPS/BPS (slow) */
+  uint8_t  enable_menu_music;       /* play background menu music (/sd2snes/menu.spc) */
 } cfg_t;
 
 int cfg_save(void);
@@ -103,9 +110,12 @@ int cfg_load(void);
 
 int cfg_validity_check_listed_games(const uint8_t *listfilename);
 int cfg_add_listed_game(const uint8_t *listfilename, uint8_t *fn, bool evict_oldest);
+int cfg_add_listed_game_patched(const uint8_t *listfilename, uint8_t *fn, const char *patch_basename, bool evict_oldest);
 int cfg_remove_listed_game(const uint8_t *listfilename, uint8_t index_to_remove);
 int cfg_get_listed_game(const uint8_t *listfilename, uint8_t *fn, uint8_t index);
-uint8_t cfg_dump_listed_games_for_snes(const uint8_t *listfilename, uint32_t address);
+int cfg_get_listed_game_raw(const uint8_t *listfilename, uint8_t *fn, uint8_t index);
+int cfg_parse_patch_entry(char *entry, char *patchpath, int size);
+uint8_t cfg_dump_listed_games_for_snes(const uint8_t *listfilename, uint32_t address, uint8_t write_lastdir);
 
 uint8_t cfg_is_autoboot_enabled(void);
 int cfg_get_autoboot_rom(uint8_t *fn);

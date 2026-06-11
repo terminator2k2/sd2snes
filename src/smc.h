@@ -33,6 +33,7 @@
 #define DSPFW_4 ((const uint8_t*)"/sd2snes/dsp4.bin")
 #define DSPFW_1B ((const uint8_t*)"/sd2snes/dsp1b.bin")
 #define DSPFW_ST0010 ((const uint8_t*)"/sd2snes/st0010.bin")
+#define STBIOS_FW ((const uint8_t*)"/sd2snes/STBIOS.bin")
 
 typedef struct __attribute__ ((__packed__)) _snes_header {
   uint8_t maker[2];     /* 0xB0 */
@@ -101,6 +102,9 @@ typedef struct __attribute__ ((__packed__)) _snes_romprops {
 } snes_romprops_t;
 
 void smc_id(snes_romprops_t*, uint32_t file_offset);
+void smc_id_sdram(snes_romprops_t* props, uint32_t sram_base, uint32_t rom_size);
+void smc_id_sdram_window(snes_romprops_t* props, uint32_t sram_base,
+                         uint32_t rom_size, uint32_t valid_bytes);
 uint8_t smc_headerscore(uint32_t addr, snes_header_t* header, uint32_t file_offset);
 
 #endif

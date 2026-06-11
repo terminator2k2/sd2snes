@@ -52,6 +52,22 @@
 #define SNES_CMD_CLR_AUTOBOOT_ROM    (0x1a) /* clear autoboot ROM setting */
 #define SNES_CMD_LOAD_AUTOBOOT       (0x1b) /* boot into the stored autoboot ROM */
 
+#define SNES_CMD_DELETE_SRM          (0x1C) /* delete SRM save file for selected ROM */
+#define SNES_CMD_TOGGLE_CHT          (0x1D) /* MCU_PARAM low byte: cheat index. XORs flag bit in PSRAM record. */
+#define SNES_CMD_LOAD_CHT_FAV        (0x1E) /* MCU_PARAM low byte: favorite index. Resolve path via cfg_get_favorite_game then cheat_yaml_load. */
+#define SNES_CMD_SAVE_CHT_FAV        (0x20) /* MCU_PARAM low byte: favorite index. Resolve path via cfg_get_favorite_game then cheat_yaml_save. */
+#define SNES_CMD_SET_SLOTB_ROM       (0x21) /* set Slot B companion cart for Sufami Turbo (non-persistent) */
+#define SNES_CMD_QUERY_IPS_PATCHES   (0x22) /* find IPS patches for selected ROM */
+#define SNES_CMD_DELETE_FILE         (0x23) /* delete selected file */
+#define SNES_CMD_LOAD_MENU_SPC       (0x24) /* stage /sd2snes/menu.spc for background menu music */
+#define SNES_CMD_DELETE_FILE_FAV     (0x25) /* MCU_PARAM low byte: favorite index. Resolve path via FAVORITES_FILE, delete the ROM, then drop the list entry. */
+#define SNES_CMD_DELETE_SRM_FAV      (0x26) /* MCU_PARAM low byte: favorite index. Resolve path via FAVORITES_FILE, delete only the .srm (ROM stays in favorites). */
+#define SNES_CMD_DELETE_FILE_RECENT  (0x27) /* MCU_PARAM low byte: recent index. Resolve path via LAST_FILE, delete the ROM, then drop the list entry. */
+#define SNES_CMD_DELETE_SRM_RECENT   (0x28) /* MCU_PARAM low byte: recent index. Resolve path via LAST_FILE, delete only the .srm (ROM stays in recents). */
+#define SNES_CMD_LOAD_CHT_RECENT     (0x29) /* MCU_PARAM low byte: recent index. Resolve path via LAST_FILE then cheat_yaml_load. */
+#define SNES_CMD_SAVE_CHT_RECENT     (0x2a) /* MCU_PARAM low byte: recent index. Resolve path via LAST_FILE then cheat_yaml_save. */
+
+
 #define SNES_CMD_SAVESTATE           (0x40)
 #define SNES_CMD_LOADSTATE           (0x41)
 
@@ -150,7 +166,8 @@ typedef struct __attribute__ ((__packed__)) _mcu_status {
   uint8_t num_recent_games;
   uint8_t pairmode;
   uint8_t num_favorite_games;
-  uint8_t autoboot_enabled;    /* 1 if an autoboot ROM is configured */
+  uint8_t autoboot_enabled;        /* 1 if an autoboot ROM is configured */
+  uint8_t reset_to_menu_active;    /* 1 if this boot is a reset-to-menu (not cold power-on) */
 } mcu_status_t;
 
 typedef struct __attribute__ ((__packed__)) _snes_status {

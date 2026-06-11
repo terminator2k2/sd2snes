@@ -54,6 +54,9 @@ fileselloop:
   lda filesel_dirty   ; is there ANY reason to redraw the menu?
   cmp #$01
   beq fileselloop_redraw ; then do
+  jsr bgm_update      ; fork: start/stop menu music. Only here (not-dirty branch)
+                      ; so the list is already painted before the ~1s SPC upload
+                      ; freezes NMI; also stops music when toggled off.
   jsr scroll_direntry
   bra fileselloop
 fileselloop_redraw
@@ -281,10 +284,6 @@ dirent_is_file
   bra dirent_type_cont
 +
   cmp #TYPE_SPC ; SPC -> palette 2
-  bne +
-  lda #$0002
-  bra dirent_type_cont
-  cmp #TYPE_IPS ; IPS -> palette 2 (green)
   bne +
   lda #$0002
   bra dirent_type_cont
@@ -565,6 +564,8 @@ select_item:
   lda [dirptr_addr], y
   cmp #TYPE_ROM
   beq sel_is_file
+  cmp #TYPE_ROM_ST
+  beq sel_is_file
   cmp #TYPE_SPC
   beq sel_is_spc
   cmp #TYPE_SUBDIR
@@ -574,7 +575,7 @@ select_item:
 select_item_cont
   rts
 sel_is_file
-  jsr select_file
+  jsr ips_select_file
   bra select_item_cont
 sel_is_parent
   jsr select_parent
@@ -775,8 +776,105 @@ wait_spc:
   lda @MCU_CMD
   cmp #$00
   bne wait_spc
+  ; fork: with menu music off the S-SMP is at IPL -> play the chosen .spc
+  ; directly (stock path). With music on the bgm is running on the S-SMP, and
+  ; the only way back to IPL (which spc700_load needs) is a SNES reset. So
+  ; warm-reset here, then RESUME at spc_play_now: the warm boot restores the SP
+  ; and set_bank does plp;rts on the [P][return] frame we push below (the same
+  ; SAVED_SP/WARM_SIGNATURE mechanism the player uses to exit in spc_key_b).
+  ; apu_ram_init runs during the warm boot, so the S-SMP is back at IPL when we
+  ; reach spc_play_now. The .spc staged in SDRAM survives the reset (it lives in
+  ; MCU-managed SDRAM, untouched by the SNES reset).
+  lda @BGM_STATE         ; only pause+warm-reset if the bgm is actually playing
+  cmp #$01               ; (config on but no menu.spc -> APU already at IPL)
+  bne spc_play_now
+  ; Build the frame set_bank's `plp; rts` will unwind on the warm boot: push the
+  ; resume address (spc_play_now-1, all menu code is bank $c0 so a near rts is
+  ; fine) then the P byte, then snapshot SP into SAVED_SP. pea pushes a 16-bit
+  ; value regardless of the M flag (same idiom as `pea !CFG_BSX_TIME`).
+  pea !(spc_play_now-1)
+  php
+  rep #$20 : .al
+  tsc
+  sta @SAVED_SP
+  lda #$fa50
+  sta @WARM_SIGNATURE
+  eor #$ffff
+  sta @WARM_COMPLEMENT
+  sep #$20 : .as
+  sei
+  stz $2100
+  jsr backup_wram
+  lda #CMD_RESET
+  sta @MCU_CMD
+-
+  bra -
+spc_play_now:
   jsr spcplayer
+  jsr menu_bgm_load     ; back from the player (S-SMP at IPL): restore the bgm.
+                        ; no-op when music is off. spcplayer normally exits via
+                        ; its own warm reset, whose set_bank rts lands here.
   rts
+
+;---------------------------------------
+; bgm_update (fork): called once per fileselloop frame. Lazily starts the menu
+; music the FIRST time (so the file list paints before the ~1s SPC upload freezes
+; NMI), and stops it when the user turns the option off mid-menu. Stopping a
+; running S-SMP is only possible with a SNES reset, so the off-path warm-resets
+; (apu_ram_init silences the APU during the warm boot) and resumes right here.
+bgm_update:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda @CFG_ENABLE_MENU_MUSIC
+  beq bgm_upd_disabled
+  ; enabled: load once. BGM_STATE 0 = not attempted yet this session.
+  lda @BGM_STATE
+  bne bgm_upd_done         ; 1=playing or 2=tried -> nothing to do
+  jsr menu_bgm_load        ; list is visible now; sets BGM_STATE to 1 or 2
+  bra bgm_upd_done
+bgm_upd_disabled:
+  lda @BGM_STATE
+  cmp #$01
+  bne bgm_upd_setidle      ; nothing playing -> just clear the attempt flag
+  ; music is playing but now disabled -> warm-reset to silence the S-SMP
+  lda #$00                 ; (snescom stz has no long mode -> lda #0 : sta)
+  sta @BGM_STATE           ; will be silent after the reset
+  jsr bgm_silence_reset    ; resumes here after the warm boot (APU back at IPL)
+  sep #$20 : .as
+  lda #$01
+  sta filesel_dirty        ; warm boot cleared VRAM -> force a browser repaint
+  bra bgm_upd_done
+bgm_upd_setidle:
+  lda #$00                 ; re-enabling later triggers a fresh load attempt
+  sta @BGM_STATE
+bgm_upd_done:
+  plp
+  rts
+
+;---------------------------------------
+; bgm_silence_reset (fork): warm-reset the SNES to return the S-SMP to IPL -- the
+; only way to stop a running SPC. Mirrors spc_key_b: snapshot SP, set the warm
+; signature, back up WRAM, issue CMD_RESET. The jsr return address already on the
+; stack (plus the P byte we push) is what set_bank's `plp; rts` unwinds after the
+; warm boot, so execution resumes in bgm_update right after the call.
+bgm_silence_reset:
+  php                      ; P byte for set_bank's plp on the warm boot
+  rep #$20 : .al
+  tsc
+  sta @SAVED_SP
+  lda #$fa50
+  sta @WARM_SIGNATURE
+  eor #$ffff
+  sta @WARM_COMPLEMENT
+  sep #$20 : .as
+  sei
+  stz $2100
+  jsr backup_wram
+  lda #CMD_RESET
+  sta @MCU_CMD
+-
+  bra -
 
 filesel_key_x:
   jsr mainmenu
@@ -800,6 +898,8 @@ open_context_menu:
   lda [dirptr_addr], y
   cmp #TYPE_ROM
   beq ctx_is_file
+  cmp #TYPE_ROM_ST
+  beq ctx_is_file_st
   cmp #TYPE_SPC
   beq ctx_is_spc
   cmp #TYPE_SUBDIR
@@ -828,12 +928,659 @@ ctx_is_file
   sta @MCU_PARAM+3
   jsr filesel_contextmenu_file
   bra open_context_menu_cont
+ctx_is_file_st
+; save selected ST file path to MCU_PARAM (same as ctx_is_file)
+  dey
+  rep #$20 : .al
+  lda [dirptr_addr], y
+  and #$00ff
+  sta @MCU_PARAM+6
+  dey
+  dey
+  lda [dirptr_addr], y
+  sta @MCU_PARAM+4
+  lda #!FILESEL_CWD
+  sta @MCU_PARAM
+  sep #$20 : .as
+  lda #^FILESEL_CWD
+  sta @MCU_PARAM+2
+  lda #$00
+  sta @MCU_PARAM+3
+  jsr filesel_contextmenu_st_file
+  bra open_context_menu_cont
 ctx_is_parent
   bra open_context_menu_cont
 ctx_is_dir
   bra open_context_menu_cont
 ctx_is_spc
+; set up MCU_PARAM with the SPC file path (same layout as ctx_is_file)
+  dey
+  rep #$20 : .al
+  lda [dirptr_addr], y
+  and #$00ff
+  sta @MCU_PARAM+6
+  dey
+  dey
+  lda [dirptr_addr], y
+  sta @MCU_PARAM+4
+  lda #!FILESEL_CWD
+  sta @MCU_PARAM
+  sep #$20 : .as
+  lda #^FILESEL_CWD
+  sta @MCU_PARAM+2
+  lda #$00
+  sta @MCU_PARAM+3
+  jsr filesel_contextmenu_spc
   bra open_context_menu_cont
+
+
+delete_selected_file:
+; Browser context.  MCU_PARAM already holds the FILESEL_CWD pointer +
+; the selected direntry (set by ctx_is_file / ctx_is_spc), which is what
+; get_selected_name() reads on the MCU.  Ask for confirmation first; on
+; ACK, refresh the listing but keep the cursor near the deleted file
+; instead of jumping back to the top.
+  php
+  phb
+  sep #$20 : .as
+  rep #$10 : .xl
+; confirm name = direntry file name: addr (MCU_PARAM+4)+6, bank (MCU_PARAM+6)+$C0
+  rep #$20 : .al
+  lda @MCU_PARAM+4
+  clc
+  adc #$0006
+  sta confirm_name_addr
+  sep #$20 : .as
+  lda @MCU_PARAM+6
+  clc
+  adc #$c0
+  sta confirm_name_bank
+  lda #^text_confirm_delete_file
+  sta confirm_prompt_bank
+  ldx #!text_confirm_delete_file
+  stx confirm_prompt_addr
+  jsr confirm_delete
+  bcs delete_file_go
+  plb
+  plp
+  rtl
+delete_file_go:
+  lda #$01
+  jsr hide_cursor
+  jsr draw_loading_window
+  jsr waitblank
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_DELETE_FILE
+  sta @MCU_CMD
+; wait for ACK/NACK
+- lda @SNES_CMD
+  cmp #$55
+  beq delete_file_ack
+  cmp #$aa
+  beq delete_file_ack
+  bra -
+delete_file_ack:
+  pha               ; save ACK/NACK value
+  lda #$55
+  sta @MCU_CMD
+  jsr pop_window
+  pla               ; restore ACK/NACK value
+  cmp #$55
+  bne delete_file_done  ; NACK: skip refresh
+; ACK: refresh the directory listing (file is gone), keep cursor position
+  jsr filesel_request_filelist
+  jsr filesel_fix_pos_after_delete
+  sep #$20 : .as
+  lda #$00
+  sta @direntry_xscroll
+  sta @direntry_xscroll_state
+  lda #$01
+  sta @filesel_dirty
+delete_file_done:
+  plb
+  plp
+  rtl
+
+delete_selected_srm:
+; Browser context.  MCU_PARAM holds the selected ROM path (set by
+; ctx_is_file).  Confirm, then delete only the .srm; the ROM list does
+; not change so no refresh is needed.
+  php
+  phb
+  sep #$20 : .as
+  rep #$10 : .xl
+  rep #$20 : .al
+  lda @MCU_PARAM+4
+  clc
+  adc #$0006
+  sta confirm_name_addr
+  sep #$20 : .as
+  lda @MCU_PARAM+6
+  clc
+  adc #$c0
+  sta confirm_name_bank
+  lda #^text_confirm_delete_srm
+  sta confirm_prompt_bank
+  ldx #!text_confirm_delete_srm
+  stx confirm_prompt_addr
+  jsr confirm_delete
+  bcs delete_srm_go
+  plb
+  plp
+  rtl
+delete_srm_go:
+  lda #$01
+  jsr hide_cursor
+  jsr draw_loading_window
+  jsr waitblank
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_DELETE_SRM
+  sta @MCU_CMD
+- lda @SNES_CMD
+  cmp #$55
+  beq +
+  cmp #$aa
+  beq +
+  bra -
++ lda #$55
+  sta @MCU_CMD
+  jsr pop_window
+  plb
+  plp
+  rtl
+
+; ----------------------------------------------------------------------
+; Favorites context deletes.  MCU_PARAM low byte = favorite list index
+; (set by select_favorite_file).  The firmware resolves the path via
+; cfg_get_listed_game(FAVORITES_FILE, ...).  Deleting the ROM also drops
+; the favorites entry (firmware side), so the list is marked dirty for a
+; redraw; deleting only the save leaves the entry in place.
+; ----------------------------------------------------------------------
+delete_favorite_file:
+  php
+  phb
+  sep #$20 : .as
+  rep #$10 : .xl
+; confirm name = FAVORITE_GAMES + idx*256
+  rep #$20 : .al
+  lda @MCU_PARAM
+  and #$00ff
+  xba                          ; idx -> idx*256
+  clc
+  adc #!FAVORITE_GAMES
+  sta confirm_name_addr
+  sep #$20 : .as
+  lda #^FAVORITE_GAMES
+  sta confirm_name_bank
+  lda #^text_confirm_delete_file
+  sta confirm_prompt_bank
+  ldx #!text_confirm_delete_file
+  stx confirm_prompt_addr
+  jsr confirm_delete
+  bcs +
+  plb
+  plp
+  rtl
++ lda #$01
+  jsr hide_cursor
+  jsr draw_loading_window
+  jsr waitblank
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_DELETE_FILE_FAV
+  sta @MCU_CMD
+- lda @SNES_CMD
+  cmp #$55
+  beq +
+  cmp #$aa
+  beq +
+  bra -
++ lda #$55
+  sta @MCU_CMD
+  sta listsel_dirty            ; entry removed -> redraw the favorites list
+  jsr pop_window
+; The deleted ROM may still be listed in the browser's current folder
+; (the directory buffer is stale).  Re-read it now so the file vanishes
+; there too; otherwise opening the now-missing ROM hangs on "Loading...".
+  jsr filesel_request_filelist
+  jsr filesel_fix_pos_after_delete
+  sep #$20 : .as
+  lda #$01
+  sta @filesel_dirty
+  plb
+  plp
+  rtl
+
+delete_favorite_srm:
+  php
+  phb
+  sep #$20 : .as
+  rep #$10 : .xl
+  rep #$20 : .al
+  lda @MCU_PARAM
+  and #$00ff
+  xba
+  clc
+  adc #!FAVORITE_GAMES
+  sta confirm_name_addr
+  sep #$20 : .as
+  lda #^FAVORITE_GAMES
+  sta confirm_name_bank
+  lda #^text_confirm_delete_srm
+  sta confirm_prompt_bank
+  ldx #!text_confirm_delete_srm
+  stx confirm_prompt_addr
+  jsr confirm_delete
+  bcs +
+  plb
+  plp
+  rtl
++ lda #$01
+  jsr hide_cursor
+  jsr draw_loading_window
+  jsr waitblank
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_DELETE_SRM_FAV
+  sta @MCU_CMD
+- lda @SNES_CMD
+  cmp #$55
+  beq +
+  cmp #$aa
+  beq +
+  bra -
++ lda #$55
+  sta @MCU_CMD
+  jsr pop_window
+  plb
+  plp
+  rtl
+
+; ----------------------------------------------------------------------
+; Recents context deletes.  MCU_PARAM low byte = recent list index (set
+; by select_last_file).  Firmware resolves the path via
+; cfg_get_listed_game(LAST_FILE, ...).  Same dirty/no-dirty split as
+; favorites.
+; ----------------------------------------------------------------------
+delete_recent_file:
+  php
+  phb
+  sep #$20 : .as
+  rep #$10 : .xl
+; confirm name = LAST_GAME + idx*256
+  rep #$20 : .al
+  lda @MCU_PARAM
+  and #$00ff
+  xba
+  clc
+  adc #!LAST_GAME
+  sta confirm_name_addr
+  sep #$20 : .as
+  lda #^LAST_GAME
+  sta confirm_name_bank
+  lda #^text_confirm_delete_file
+  sta confirm_prompt_bank
+  ldx #!text_confirm_delete_file
+  stx confirm_prompt_addr
+  jsr confirm_delete
+  bcs +
+  plb
+  plp
+  rtl
++ lda #$01
+  jsr hide_cursor
+  jsr draw_loading_window
+  jsr waitblank
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_DELETE_FILE_RECENT
+  sta @MCU_CMD
+- lda @SNES_CMD
+  cmp #$55
+  beq +
+  cmp #$aa
+  beq +
+  bra -
++ lda #$55
+  sta @MCU_CMD
+  sta listsel_dirty            ; entry removed -> redraw the recents list
+  jsr pop_window
+; Same as the favorites case: drop the now-stale browser entry so the
+; deleted ROM can't be opened (and hang) from the current folder.
+  jsr filesel_request_filelist
+  jsr filesel_fix_pos_after_delete
+  sep #$20 : .as
+  lda #$01
+  sta @filesel_dirty
+  plb
+  plp
+  rtl
+
+delete_recent_srm:
+  php
+  phb
+  sep #$20 : .as
+  rep #$10 : .xl
+  rep #$20 : .al
+  lda @MCU_PARAM
+  and #$00ff
+  xba
+  clc
+  adc #!LAST_GAME
+  sta confirm_name_addr
+  sep #$20 : .as
+  lda #^LAST_GAME
+  sta confirm_name_bank
+  lda #^text_confirm_delete_srm
+  sta confirm_prompt_bank
+  ldx #!text_confirm_delete_srm
+  stx confirm_prompt_addr
+  jsr confirm_delete
+  bcs +
+  plb
+  plp
+  rtl
++ lda #$01
+  jsr hide_cursor
+  jsr draw_loading_window
+  jsr waitblank
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_DELETE_SRM_RECENT
+  sta @MCU_CMD
+- lda @SNES_CMD
+  cmp #$55
+  beq +
+  cmp #$aa
+  beq +
+  bra -
++ lda #$55
+  sta @MCU_CMD
+  jsr pop_window
+  plb
+  plp
+  rtl
+
+; ----------------------------------------------------------------------
+; confirm_delete: modal Yes/No confirmation box, default "No".
+;   in:  confirm_prompt_bank/confirm_prompt_addr = prompt line
+;        confirm_name_bank/confirm_name_addr     = file name to show
+;                                                  ($00 bank -> blank line)
+;   out: carry set   = confirmed (Yes)
+;        carry clear = cancelled (No / B)
+; Enters and exits in .as/.xl.  Draws its own window and parks the
+; hardware selection bar so nothing bleeds through the popup.
+; ----------------------------------------------------------------------
+confirm_delete:
+  sep #$20 : .as
+  rep #$10 : .xl
+  stz confirm_sel                  ; default = No
+; park the selection bar off-screen
+  lda bar_xl
+  pha
+  lda bar_yl
+  pha
+  lda bar_wl
+  pha
+  lda #$ff
+  sta bar_xl
+  sta bar_yl
+  sta bar_wl
+; closed-border box: 44 wide, x=10, y=11, h=8
+; rows: top | prompt | name | blank | options | blank | hint | bottom
+  lda #10
+  sta window_x
+  lda #11
+  sta window_y
+  lda #44
+  sta window_w
+  lda #$08
+  sta window_h
+  lda #^zero
+  sta window_tbank
+  ldx #!zero
+  stx window_taddr
+  jsr push_window
+  jsr draw_window
+; prompt on window_y+1
+  lda confirm_prompt_bank
+  sta print_bank
+  ldx confirm_prompt_addr
+  stx print_src
+  lda window_y
+  inc
+  sta print_y
+  jsr confirm_center_print
+; file name on window_y+2 (skip if bank 0)
+  lda confirm_name_bank
+  beq confirm_no_name
+  sta print_bank
+  ldx confirm_name_addr
+  stx print_src
+  lda window_y
+  clc
+  adc #$02
+  sta print_y
+  jsr confirm_center_print
+confirm_no_name:
+; hint on window_y+6 (blank row at window_y+5 separates it from the options)
+  lda #^text_confirm_hint
+  sta print_bank
+  ldx #!text_confirm_hint
+  stx print_src
+  lda window_y
+  clc
+  adc #$06
+  sta print_y
+  jsr confirm_center_print
+; options on window_y+4
+  jsr confirm_redraw_opts
+  jsr enable_screen_update
+confirm_loop:
+  lda isr_done
+  beq confirm_loop
+  stz isr_done
+  jsr printtime
+  jsr read_pad
+  lda pad_b
+  bne confirm_cancel
+  lda pad_a
+  bne confirm_finish               ; A accepts the current option
+  lda pad_left
+  ora pad_right
+  ora pad_up
+  ora pad_down
+  bne confirm_toggle
+  bra confirm_loop
+confirm_toggle:
+  lda confirm_sel
+  eor #$01
+  sta confirm_sel
+  jsr confirm_redraw_opts
+  bra confirm_loop
+confirm_cancel:
+  stz confirm_sel                  ; B -> No
+confirm_finish:
+  jsr pop_window
+  pla
+  sta bar_wl
+  pla
+  sta bar_yl
+  pla
+  sta bar_xl
+  lda confirm_sel
+  beq confirm_ret_no
+  sec
+  rts
+confirm_ret_no:
+  clc
+  rts
+
+; ----------------------------------------------------------------------
+; confirm_redraw_opts: (re)draw the [No]/[Yes] option line.  The selected
+; option uses the bracketed string, the other the spaced one; both states
+; are the same width so toggling overwrites cleanly.  print_y is computed
+; from window_y so it tracks the box.
+; ----------------------------------------------------------------------
+confirm_redraw_opts:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda window_y
+  clc
+  adc #$04
+  sta print_y
+; No option at col 22
+  lda confirm_sel
+  bne cro_no_unsel
+  lda #^text_confirm_no_sel
+  sta print_bank
+  ldx #!text_confirm_no_sel
+  stx print_src
+  bra cro_no_draw
+cro_no_unsel:
+  lda #^text_confirm_no_unsel
+  sta print_bank
+  ldx #!text_confirm_no_unsel
+  stx print_src
+cro_no_draw:
+  stz print_pal
+  lda #$06
+  sta print_count
+  lda #22
+  sta print_x
+  jsr hiprint
+; Yes option at col 36
+  lda confirm_sel
+  beq cro_yes_unsel
+  lda #^text_confirm_yes_sel
+  sta print_bank
+  ldx #!text_confirm_yes_sel
+  stx print_src
+  bra cro_yes_draw
+cro_yes_unsel:
+  lda #^text_confirm_yes_unsel
+  sta print_bank
+  ldx #!text_confirm_yes_unsel
+  stx print_src
+cro_yes_draw:
+  stz print_pal
+  lda #$06
+  sta print_count
+  lda #36
+  sta print_x
+  jsr hiprint
+  plp
+  rts
+
+; ----------------------------------------------------------------------
+; confirm_center_print: center print_bank/print_src (a const_lang or raw
+; pointer) on row print_y inside the current window_x/window_w box.
+; Mirrors the centering in show_empty_msg.  Enters/exits in .as/.xl.
+; ----------------------------------------------------------------------
+confirm_center_print:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda print_bank
+  ldy print_src
+  jsr resolve_yx                   ; resolves print_*; A=bank, Y=addr
+  phb
+  pha
+  plb
+  jsr strlen                       ; Y = length
+  plb
+  sep #$20 : .as
+  tya
+  sta window_tmp                   ; window_tmp = string length
+; Keep a 1-col blank margin inside each border.  If the string is wider than the
+; padded interior (window_w - 4), truncate it to (window_w - 7) chars and append
+; "..." so it never spills past the margin/border.
+  lda window_w
+  sec
+  sbc #$04                         ; padded interior width (1-col margin each side)
+  cmp window_tmp
+  bcc confirm_print_trunc          ; padded interior < length -> truncate + ellipsis
+; fits: centre it
+  lda window_w
+  sec
+  sbc window_tmp                   ; window_w - length
+  lsr                              ; /2
+  clc
+  adc window_x
+  sta print_x
+  stz print_pal
+  lda #56
+  sta print_count
+  jsr hiprint
+  plp
+  rts
+confirm_print_trunc:
+  lda window_x                     ; left edge + 1-col margin
+  clc
+  adc #$02
+  sta print_x
+  stz print_pal
+  lda window_w
+  sec
+  sbc #$07                         ; name chars = padded interior - 3 ("...")
+  sta print_count
+  jsr hiprint                      ; print_bank/print_src still point at the name
+  lda window_x                     ; "..." right after the truncated name
+  clc
+  adc window_w
+  sec
+  sbc #$05                         ; = window_x + window_w - 5 (1-col right margin)
+  sta print_x
+  lda #^confirm_ellipsis
+  sta print_bank
+  ldx #!confirm_ellipsis
+  stx print_src
+  lda #$03
+  sta print_count
+  jsr hiprint
+  plp
+  rts
+confirm_ellipsis .byt "...", 0
+
+; ----------------------------------------------------------------------
+; filesel_fix_pos_after_delete: keep the cursor near the deleted entry.  Keep the
+; page top (dirptr_addr) where it was if it still falls inside the (now shorter)
+; listing; otherwise fall back to the top.  The redraw's filesel_cleanup then
+; clamps filesel_sel down if it points past the new last entry, so the cursor
+; lands on the entry that took the deleted one's place (or the new last).
+; This relies on dirend_addr being correct, which filesel_request_filelist now
+; guarantees by taking it from the firmware's authoritative entry count (it used
+; to scan the SDRAM dir table from the SNES, which could read a stale/partial
+; buffer and yield a too-short dirend -> corrupted navigation).
+; ----------------------------------------------------------------------
+filesel_fix_pos_after_delete:
+  php
+  rep #$20 : .al
+  lda @dirptr_addr
+  cmp @dirend_addr
+  bcc fix_pos_done                 ; page top still within the dir -> keep position
+; page top is past the new (shrunken) end -> snap to the LAST page so the cursor
+; stays near the bottom, instead of jumping all the way to the top.
+  lda @dirend_addr
+  lsr
+  lsr                              ; A = entry count
+  cmp #18                          ; listdisp (visible rows)
+  bcs +                            ; count >= one page -> last page = (count-18)*4
+  lda #0                           ; stz has no long (@) addressing mode on 65816;
+  sta @dirptr_addr                 ; A is 16-bit here & dead after -> lda#0/sta@ == stz
+  bra fix_pos_done
++ sec
+  sbc #18
+  asl
+  asl
+  sta @dirptr_addr
+fix_pos_done:
+  sep #$20 : .as
+  plp
+  rts
 
 setup_224:
   php
@@ -903,13 +1650,114 @@ filesel_statusbar
   pla
   rts
 
+; show_empty_msg: pop up a small centered message box (closed border, NO title)
+; with the message text centered INSIDE the box, then wait for A/B/Start/Select
+; before closing. The caller passes the message string pointer in
+; window_tbank/window_taddr (a const_lang dispatch table is fine -> resolved here).
+; Used for the empty Recent/Favorite lists so the keypress that opened the list
+; gives visible feedback. Enters in .as/.xl with DBR=$7e.
+show_empty_msg:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda bar_xl              ; the select bar is a hardware colour window (drawn by the
+  pha                     ; NMI from bar_xl/yl/wl), not a tile, so push_window can't
+  lda bar_yl              ; hide it -> save it and park it off-screen ($ff, like
+  pha                     ; spcplayer) so it doesn't bleed under the popup border
+  lda bar_wl
+  pha
+  lda #$ff
+  sta bar_xl
+  sta bar_yl
+  sta bar_wl
+  lda window_tbank        ; stash the caller's message pointer across draw_window
+  pha
+  rep #$20 : .al
+  lda window_taddr
+  pha
+  sep #$20 : .as
+  lda #20
+  sta window_x
+  lda #13
+  sta window_y
+  lda #24
+  sta window_w
+  lda #3
+  sta window_h
+  lda #^zero              ; empty title -> draw_window draws a closed top border
+  sta window_tbank
+  ldx #!zero
+  stx window_taddr
+  jsr push_window
+  jsr draw_window
+  rep #$20 : .al          ; recover the message pointer into print_src/print_bank
+  pla
+  sta print_src
+  sep #$20 : .as
+  pla
+  sta print_bank
+  lda print_bank          ; resolve language + measure length to center it
+  ldy print_src
+  jsr resolve_yx          ; A=resolved bank, Y=resolved addr; print_* now resolved
+  phb
+  pha
+  plb                     ; DB = resolved string bank (for strlen)
+  jsr strlen              ; Y = string length
+  plb                     ; restore DB
+  sep #$20 : .as
+  tya                     ; A = length (always < 256)
+  sta window_tmp          ; draw_window is done, so window_tmp is free scratch
+  lda window_w
+  sec
+  sbc window_tmp          ; window_w - length
+  lsr                     ; / 2
+  clc
+  adc window_x            ; print_x = window_x + (window_w - length)/2  (centered)
+  sta print_x
+  lda window_y
+  inc                     ; print_y = body row (window_y + 1, for h=3)
+  sta print_y
+  stz print_pal           ; palette 0 (white), same as list text
+  lda #56
+  sta print_count
+  jsr hiprint             ; draw the message INSIDE the box
+  jsr enable_screen_update
+show_empty_msg_wait:
+  lda isr_done
+  beq show_empty_msg_wait
+  stz isr_done
+  jsr printtime
+  jsr read_pad
+  lda pad_a
+  ora pad_b
+  ora pad_start
+  ora pad_select
+  beq show_empty_msg_wait
+  jsr pop_window
+  pla                     ; restore the selection bar for the underlying menu/list
+  sta bar_wl
+  pla
+  sta bar_yl
+  pla
+  sta bar_xl
+  plp
+  rts
+
 select_last_file:
   php
   sep #$20 : .as
   rep #$10 : .xl
   lda #$00
   sta listsel_backup
-select_last_redraw:
+  lda @ST_NUM_RECENT_GAMES       ; first open: if the list is empty, show the message
+  bne select_last_redraw
+  lda #^text_no_last
+  sta window_tbank
+  ldx #!text_no_last
+  stx window_taddr
+  jsr show_empty_msg
+  jmp select_last_file_out
+select_last_redraw:               ; redraw after a remove: if now empty, just close
   lda @ST_NUM_RECENT_GAMES
   sta num_recent_games
   stz recent_sel
@@ -984,6 +1832,9 @@ select_last_file_play:
   jsr game_handshake
   bra select_favorite_file_done
 select_last_file_context_menu:
+  jsr cover_menu_off         ; hide the floating box-art cover so it doesn't
+                             ; float over the context / cheat windows (it
+                             ; reloads when we return to the recents list)
   jsr filesel_recent_contextmenu
   lda listsel_dirty
   bne +
@@ -1006,7 +1857,15 @@ select_favorite_file:
   rep #$10 : .xl
   lda #$00
   sta listsel_backup
-select_favorite_redraw:
+  lda @ST_NUM_FAVORITE_GAMES     ; first open: if the list is empty, show the message
+  bne select_favorite_redraw
+  lda #^text_no_favorite
+  sta window_tbank
+  ldx #!text_no_favorite
+  stx window_taddr
+  jsr show_empty_msg
+  jmp select_favorite_file_out
+select_favorite_redraw:           ; redraw after a remove: if now empty, just close
   lda @ST_NUM_FAVORITE_GAMES
   bne +
   jmp select_favorite_file_out
@@ -1080,6 +1939,9 @@ select_favorite_file_play
   jsr game_handshake
   bra select_favorite_file_done
 select_favorite_file_context_menu
+  jsr cover_menu_off         ; hide the floating box-art cover so it doesn't
+                             ; float over the context / cheat windows (it
+                             ; reloads when we return to the favorites list)
   jsr filesel_favorites_contextmenu
   lda listsel_dirty          ; need redraw?
   bne +
@@ -1094,8 +1956,8 @@ select_favorite_file_out
   jsr enable_screen_update
   plp
   rtl
-
-; TODO the following seven functions differ only in the command byte
+  
+ ; TODO the following seven functions differ only in the command byte
 ;      sent to the MCU and whether the listsel_dirty flag is set.
 ;      consider merging!
 add_selected_file_to_favorites:
@@ -1188,7 +2050,7 @@ remove_selected_recent_file:
   jsr pop_window
   plb
   plp
-  rtl
+  rtl 
 
 remove_selected_favorite_file:
 ; have MCU remove the file from the favorites list
@@ -1262,6 +2124,38 @@ set_recent_as_autoboot_rom:
   lda #$00
   sta @SNES_CMD
   lda #CMD_SET_AUTOBOOT_RECENT
+  sta @MCU_CMD
+; wait for ACK/NACK
+- lda @SNES_CMD
+  cmp #$55
+; success
+  beq +
+  cmp #$aa
+; failure
+  beq +
+  bra -
++ lda #$55
+  sta @MCU_CMD
+  jsr pop_window
+  plb
+  plp
+  rtl
+
+
+set_selected_as_slotb_rom:
+; have MCU store the selected .ST file as the Slot B companion cart
+; the file path should already have been saved to MCU_PARAM before calling
+; this routine (done by open_context_menu / ctx_is_file_st)
+  php
+  phb
+  sep #$20 : .as
+  lda #$01
+  jsr hide_cursor
+  jsr draw_loading_window
+  jsr waitblank
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_SET_SLOTB_ROM
   sta @MCU_CMD
 ; wait for ACK/NACK
 - lda @SNES_CMD
@@ -1391,6 +2285,20 @@ filesel_request_filelist:
   php
   phb
   rep #$30 : .al : .xl
+; Settle the MCU command channel before issuing CMD_READDIR.  The browser
+; delete path chains two MCU commands with no idle in between
+; (CMD_DELETE_FILE in delete_selected_file -> CMD_READDIR here), and the
+; favorites/recents deletes do the same.  Both commands share SNES_CMD/MCU_CMD
+; and the single $55 "ready" sentinel, so without a settle the firmware's
+; ready-$55 from the delete can be mistaken for READDIR's completion: WRAM_WAIT_MCU
+; returns early and the dir-end scan below runs BEFORE scan_dir rewrote the table
+; -> bogus (short) dirend_addr -> R/page navigation reads past the table and the
+; list renders garbage.  wait_mcu_ready clears MCU_CMD and spins (bounded) until
+; the firmware is back at its command poll with $55 set, exactly like
+; cover_sync_before_cmd does ahead of game_handshake.  Harmless for the
+; non-chained callers (select_dir / filesel_init): the MCU is already idle so it
+; returns immediately.
+  jsr wait_mcu_ready
   lda #!FILESEL_CWD
   sta @MCU_PARAM
   lda #!ROOT_DIR
@@ -1408,8 +2316,10 @@ filesel_request_filelist:
   sta @MCU_PARAM+10
   lda #TYPE_SPC
   sta @MCU_PARAM+11
-  lda #$00
+  lda #TYPE_ROM_ST
   sta @MCU_PARAM+12
+  lda #$00
+  sta @MCU_PARAM+13
   sta @SNES_CMD
   lda #CMD_READDIR
   sta @MCU_CMD
@@ -1421,18 +2331,430 @@ filesel_request_filelist:
 filesel_request_filelist_wait_mcu:
   jsl @WRAM_WAIT_MCU
   jsr pop_window
-  ldy #$0002
-- lda [dirstart_addr], y
-  beq +
-  iny
-  iny
-  iny
-  iny
-  bra -
-+ rep #$20 : .al
-  tya
-  and #$fffc
+; dirend_addr = (entry count reported by the firmware) * 4.  The firmware wrote
+; the count into MCU_PARAM right after scan_dir; reading it back from the snescmd
+; region is reliable.  The old approach scanned the SDRAM directory table at $C1
+; from the SNES side here, but right after the firmware's write that read can come
+; back stale/partial (measured: dirend=$0018 for a 39-entry dir) -> a too-short
+; dirend_addr that breaks R / page navigation.  DBR is $00 here so @MCU_PARAM and
+; the dirend_addr store both resolve through the bank-0 WRAM mirror correctly.
+  rep #$20 : .al
+  lda @MCU_PARAM
+  asl
+  asl
   sta dirend_addr
   plb
   plp
+  rts
+
+; =========================================================
+; filesel_nav_last:
+;   Navigate the file browser to the folder of the most
+;   recently played game.
+;   Folder mode (CFG_ENABLE_RST_TO_MENU == 2): folder only.
+;   Rom mode   (CFG_ENABLE_RST_TO_MENU == 3): folder + pre-select ROM.
+;   Called after filesel_init when reset_to_menu >= 2 AND
+;   ST_RESET_TO_MENU_ACTIVE is set (i.e. the console returned to
+;   the menu via a short reset, not via a cold power-on).
+;   Precondition: filesel_init has already been called.
+;   Uses scratch variables: testvar[0..5], longptr,
+;   dirent_addr, dirent_bank, mm_tmp.
+; =========================================================
+filesel_nav_last:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  ; Bail out early if no directory path is stored
+  lda @LAST_GAME_DIR
+  beq fnl_out
+  ; For Rom mode (3) also bail if no last game filename is stored
+  lda @CFG_ENABLE_RST_TO_MENU
+  cmp #$03
+  bne +
+  lda @LAST_GAME
+  beq fnl_out
++
+  ; Navigate path components one by one.
+  ; LAST_GAME_DIR = "/A/B/C" — start after leading '/'
+  ldx #$0001
+fnl_comp_loop:
+  lda @LAST_GAME_DIR, x
+  beq fnl_find_file       ; end of path → already in correct dir
+  stx testvar             ; fnl_comp_start = x
+fnl_find_comp_end:
+  lda @LAST_GAME_DIR, x
+  beq fnl_got_comp_eos    ; null = last component
+  cmp #$2f                ; '/'
+  beq fnl_got_comp_slash
+  inx
+  bra fnl_find_comp_end
+fnl_got_comp_slash:
+  stx testvar+2           ; fnl_comp_end = x (exclusive, '/' position)
+  jsr fnl_enter_subdir
+  bcc fnl_out             ; not found — bail out
+  ldx testvar+2           ; restore x — fnl_enter_subdir clobbers it
+  inx                     ; skip '/'
+  bra fnl_comp_loop
+fnl_got_comp_eos:
+  stx testvar+2           ; fnl_comp_end = x (at null)
+  jsr fnl_enter_subdir    ; navigate into last path component
+  ; fall through to file scan
+fnl_find_file:
+  ; Only pre-select ROM when mode is Rom (3); Folder (2) skips this
+  sep #$20 : .as
+  lda @CFG_ENABLE_RST_TO_MENU
+  cmp #$03
+  bne fnl_out
+  jsr fnl_select_file
+fnl_out:
+  sep #$20 : .as
+  lda #$01
+  sta filesel_dirty
+  plp
+  rts
+
+; =========================================================
+; fnl_enter_subdir:
+;   Scan current directory for a TYPE_SUBDIR entry whose
+;   name matches LAST_GAME_DIR[comp_start..comp_end).
+;   On match: saves parent state to dirlog, appends the
+;   component to FILESEL_CWD, requests the new listing,
+;   and resets dir pointers.
+;   Returns carry set = found, carry clear = not found.
+; =========================================================
+fnl_enter_subdir:
+  rep #$20 : .al
+  lda #$0000
+  sta testvar+4           ; current entry byte offset = 0
+fnl_es_loop:
+  ; Point longptr at current entry in $C1
+  lda testvar+4
+  sta longptr
+  sep #$20 : .as
+  lda #$C1
+  sta longptr+2
+  ; bank offset of entry (= 0 → end of list)
+  rep #$10 : .xl
+  ldy #$0002
+  sep #$20 : .as
+  lda [longptr], y
+  beq fnl_es_not_found
+  ; check type == TYPE_SUBDIR
+  iny
+  lda [longptr], y
+  cmp #TYPE_SUBDIR
+  bne fnl_es_next
+  ; Read name address: entry[0-1] → dirent_addr, entry[2]+$C0 → dirent_bank
+  ldy #$0000
+  rep #$20 : .al
+  lda [longptr], y
+  sta dirent_addr
+  ldy #$0002
+  sep #$20 : .as
+  lda [longptr], y
+  clc
+  adc #$C0
+  sta dirent_bank
+  ; Point longptr at name start (dirent_addr + 6 skips size string)
+  rep #$20 : .al
+  lda dirent_addr
+  clc
+  adc #$0006
+  sta longptr
+  sep #$20 : .as
+  lda dirent_bank
+  sta longptr+2
+  ; Compare name against path component
+  jsr fnl_cmp_subdir
+  bcc fnl_es_next
+  ; ---- Match: save dirlog entry ----
+  ; Layout (8 bytes): dirstart_addr(2), dirstart_bank(1),
+  ;                   dirptr_addr(2), dirptr_bank(1), filesel_sel(2)
+  rep #$20 : .al
+  ldy #$0000
+  lda #$0000
+  sta [dirlog_idx], y     ; dirstart_addr = 0
+  iny
+  iny
+  lda #$00C1
+  sta [dirlog_idx], y     ; dirstart_bank lo = $C1 (hi byte overwritten next)
+  iny
+  lda testvar+4           ; dirptr_addr = entry offset (screen starts here on B)
+  sta [dirlog_idx], y
+  iny
+  iny
+  lda #$00C1
+  sta [dirlog_idx], y     ; dirptr_bank lo = $C1
+  iny
+  lda #$0000
+  sta [dirlog_idx], y     ; filesel_sel = 0
+  ; Advance dirlog_idx by 8
+  lda dirlog_idx
+  clc
+  adc #$0008
+  sta dirlog_idx
+  ; Append component to FILESEL_CWD and reload directory
+  jsr fnl_append_cwd
+  jsr filesel_request_filelist
+  rep #$20 : .al
+  lda #$0000
+  sta @dirptr_addr
+  sta @dirstart_addr
+  sep #$20 : .as
+  sta @filesel_sel
+  sta @direntry_xscroll
+  sta @direntry_xscroll_state
+  sec                     ; carry set = found
+  rts
+fnl_es_next:
+  rep #$20 : .al
+  lda testvar+4
+  clc
+  adc #$0004
+  sta testvar+4
+  bra fnl_es_loop
+fnl_es_not_found:
+  clc                     ; carry clear = not found
+  rts
+
+; =========================================================
+; fnl_append_cwd:
+;   Append '/' + LAST_GAME_DIR[comp_start..comp_end) to
+;   FILESEL_CWD and null-terminate.
+; =========================================================
+fnl_append_cwd:
+  sep #$20 : .as
+  rep #$10 : .xl
+  ; Point longptr at LAST_GAME_DIR ($FF1F00) for [longptr],y access
+  rep #$20 : .al
+  lda #$1F00
+  sta longptr
+  sep #$20 : .as
+  lda #$FF
+  sta longptr+2
+  ; Find the null-terminator of FILESEL_CWD using X (long,X)
+  ldx #$0000
+fnl_ac_find_end:
+  lda @FILESEL_CWD, x
+  beq fnl_ac_at_end
+  inx
+  bra fnl_ac_find_end
+fnl_ac_at_end:
+  ; x is at null. Back up to last char and check for '/'
+  dex
+  lda @FILESEL_CWD, x
+  cmp #$2f
+  beq fnl_ac_has_slash
+  inx                     ; move x past last non-slash char
+fnl_ac_has_slash:
+  lda #$2f
+  sta @FILESEL_CWD, x
+  inx
+  ; Copy path component via indirect long Y ([longptr],y = $B7, valid)
+  ldy testvar             ; Y = comp_start index
+fnl_ac_copy:
+  cpy testvar+2           ; Y == comp_end?
+  beq fnl_ac_done
+  lda [longptr], y        ; LAST_GAME_DIR[Y] — indirect long Y, valid
+  sta @FILESEL_CWD, x     ; FILESEL_CWD[X] — long,X, valid
+  inx
+  iny
+  bra fnl_ac_copy
+fnl_ac_done:
+  lda #$00
+  sta @FILESEL_CWD, x
+  rts
+
+; =========================================================
+; fnl_select_file:
+;   Scan the current directory for a TYPE_ROM or TYPE_SPC
+;   entry whose name matches LAST_GAME[0] (just filename).
+;   On match: sets filesel_sel and adjusts dirptr_addr so
+;   the entry is visible.
+; =========================================================
+fnl_select_file:
+  rep #$20 : .al
+  lda #$0000
+  sta testvar+4           ; current entry byte offset = 0
+fnl_sf_loop:
+  lda testvar+4
+  sta longptr
+  sep #$20 : .as
+  lda #$C1
+  sta longptr+2
+  rep #$10 : .xl
+  ldy #$0002
+  sep #$20 : .as
+  lda [longptr], y
+  beq fnl_sf_done         ; end of list
+  iny
+  lda [longptr], y
+  cmp #TYPE_ROM
+  beq fnl_sf_check
+  cmp #TYPE_SPC
+  beq fnl_sf_check
+  bra fnl_sf_next
+fnl_sf_check:
+  ldy #$0000
+  rep #$20 : .al
+  lda [longptr], y
+  sta dirent_addr
+  ldy #$0002
+  sep #$20 : .as
+  lda [longptr], y
+  clc
+  adc #$C0
+  sta dirent_bank
+  rep #$20 : .al
+  lda dirent_addr
+  clc
+  adc #$0006
+  sta longptr
+  sep #$20 : .as
+  lda dirent_bank
+  sta longptr+2
+  jsr fnl_cmp_file
+  bcc fnl_sf_next
+  ; Match: compute entry index = testvar+4 / 4
+  rep #$20 : .al
+  lda testvar+4
+  lsr
+  lsr                     ; A = entry index
+  cmp listdisp
+  bcs fnl_sf_scroll
+  ; index < listdisp: show from top, cursor at index
+  sta @filesel_sel
+  lda #$0000
+  sta @dirptr_addr
+  sta @dirstart_addr
+  bra fnl_sf_done
+fnl_sf_scroll:
+  ; index >= listdisp: scroll so entry appears last on screen
+  sec
+  sbc listdisp
+  inc
+  asl
+  asl                     ; A = (index - listdisp + 1) * 4
+  sta @dirptr_addr        ; scroll so the matched entry is the last visible row
+  lda #$0000
+  sta @dirstart_addr      ; the directory ALWAYS starts at $C1:0000 — keep the
+                          ; scroll floor at 0 (do NOT set it to the scroll
+                          ; offset, or Up/PageUp/End/Home break and the list
+                          ; corrupts once dirptr drops below the bogus floor)
+  lda listdisp
+  dec
+  sta @filesel_sel
+  bra fnl_sf_done
+fnl_sf_next:
+  rep #$20 : .al
+  lda testvar+4
+  clc
+  adc #$0004
+  sta testvar+4
+  bra fnl_sf_loop
+fnl_sf_done:
+  rts
+
+; =========================================================
+; fnl_cmp_subdir:
+;   Case-insensitive compare of name at longptr[0..] against
+;   LAST_GAME_DIR[comp_start..comp_end).
+;   Subdir entry names end with '/' in PSRAM.
+;   Returns carry set = match, carry clear = no match.
+; =========================================================
+fnl_cmp_subdir:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  ldy #$0000
+  ldx testvar             ; X = comp_start
+fnl_cs_loop:
+  cpx testvar+2           ; end of target component?
+  beq fnl_cs_eot
+  ; Read and uppercase entry char
+  lda [longptr], y
+  and #$DF
+  sta mm_tmp
+  ; Read and uppercase target char
+  lda @LAST_GAME_DIR, x
+  and #$DF
+  cmp mm_tmp
+  bne fnl_cs_no
+  inx
+  iny
+  bra fnl_cs_loop
+fnl_cs_eot:
+  ; Target exhausted: entry must have trailing '/' (or null)
+  lda [longptr], y
+  cmp #$2f
+  beq fnl_cs_yes
+  cmp #$00
+  beq fnl_cs_yes
+fnl_cs_no:
+  plp
+  clc
+  rts
+fnl_cs_yes:
+  plp
+  sec
+  rts
+
+; =========================================================
+; fnl_cmp_file:
+;   Case-insensitive compare of name at longptr[0..] against
+;   LAST_GAME[0] (null-terminated filename).
+;   Handles hide_extensions: $01 in entry name treated as '.'.
+;   Returns carry set = match, carry clear = no match.
+; =========================================================
+fnl_cmp_file:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  ldy #$0000              ; Y indexes entry string via [longptr]
+  ldx #$0000              ; X indexes LAST_GAME via long,X
+fnl_cf_loop:
+  ; Read entry char; $01 = hidden extension dot
+  lda [longptr], y
+  cmp #$01
+  bne fnl_cf_not_ext
+  lda #$2e                ; treat $01 as '.'
+fnl_cf_not_ext:
+  sta mm_tmp              ; mm_tmp = RAW entry char (post $01 -> '.')
+  ; Read LAST_GAME[X] char — long,X ($BF), valid in 65816
+  lda @LAST_GAME, x       ; A = RAW target char
+  ; End-of-string MUST be detected on the raw bytes, BEFORE case-folding:
+  ; 0x20 (space) & 0xDF == 0x00, so folding first lets a space pose as the
+  ; NUL terminator and truncates the compare at the first space. Almost
+  ; every No-Intro ROM name contains a space, so that would pre-select the
+  ; wrong ROM (the first one sharing the pre-space token).
+  bne fnl_cf_tgt          ; target char present
+  lda mm_tmp              ; target == NUL: full match iff entry is also NUL
+  beq fnl_cf_yes
+  bra fnl_cf_no           ; entry longer than target -> no match
+fnl_cf_tgt:
+  pha                     ; save raw target char
+  lda mm_tmp              ; entry char
+  beq fnl_cf_no_bal       ; entry ended before target -> no match
+  and #$DF                ; case-fold entry (space stays distinct from NUL)
+  sta mm_tmp
+  pla                     ; raw target char
+  and #$DF                ; case-fold target
+  cmp mm_tmp
+  bne fnl_cf_no
+  iny
+  inx
+  bra fnl_cf_loop
+fnl_cf_no_bal:
+  pla                     ; discard saved target, keep the stack balanced
+  bra fnl_cf_no
+fnl_cf_yes:
+  plp
+  sec
+  rts
+fnl_cf_no:
+  plp
+  clc
+  rts
+
+cover_menu_off:
   rts
