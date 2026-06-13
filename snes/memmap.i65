@@ -100,6 +100,7 @@
 #define CMD_SET_AUTOBOOT_RECENT     $19
 #define CMD_CLR_AUTOBOOT_ROM        $1a /* clear autoboot ROM setting */
 #define CMD_LOAD_AUTOBOOT           $1b /* trigger autoboot at cold boot */
+<<<<<<< HEAD
 #define CMD_DELETE_SRM              $1C /* delete SRM save file for selected ROM */
 #define CMD_TOGGLE_CHT              $1D /* MCU_PARAM low byte: cheat index. MCU XORs the flag bit in PSRAM record. */
 #define CMD_LOAD_CHT_FAV            $1E /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_load. */
@@ -114,6 +115,8 @@
 #define CMD_DELETE_SRM_RECENT       $28 /* MCU_PARAM low byte: recent index. Delete only the .srm (ROM stays in recents). */
 #define CMD_LOAD_CHT_RECENT         $29 /* MCU_PARAM low byte: recent index. Resolves path via LAST_FILE then cheat_yaml_load. */
 #define CMD_SAVE_CHT_RECENT         $2A /* MCU_PARAM low byte: recent index. Resolves path via LAST_FILE then cheat_yaml_save. */
+#define CMD_SET_MENU_SPC            $2B /* selected .spc (MCU_PARAM set like LOADROM): store full path in CFG.bgm_name, enable music */
+#define CMD_CLR_MENU_SPC            $2C /* clear CFG.bgm_name -> menu BGM falls back to /sd2snes/menu.spc */
 #define SFX_MAILBOX                 $002BE0 /* fork: menu sound effects mailbox (sfx.a65 <-> MCU menu loop). Value = effect+1 (1-4: cursor/confirm/back/error), 0 = consumed. DEDICATED byte: sharing MCU_CMD raced the real commands. NOT $2A08: MCU_PARAM is a 12-BYTE region ($2A04-$2A0F, settime writes +11) - parking there corrupted cover requests and saved garbled favorites. $2BE0 sits in the unreferenced $2BB4-$2BEF gap. Newest-wins, fire-and-forget. */
 
 
@@ -178,6 +181,7 @@
 #define CFG_PATCH_VERIFY_INTEGRITY      CFG_ADDR+$00B8
 #define CFG_ENABLE_MENU_MUSIC           CFG_ADDR+$00B9
 #define CFG_ENABLE_MENU_SFX             CFG_ADDR+$00BB
+#define CFG_MENU_MUSIC_FILE             CFG_ADDR+$00BC
 
 #define MENU_ENTRY_SIZE             23
 

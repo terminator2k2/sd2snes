@@ -51,7 +51,6 @@
 #define SNES_CMD_SET_AUTOBOOT_RECENT (0x19) /* set autoboot from recent games list (index in MCU_PARAM) */
 #define SNES_CMD_CLR_AUTOBOOT_ROM    (0x1a) /* clear autoboot ROM setting */
 #define SNES_CMD_LOAD_AUTOBOOT       (0x1b) /* boot into the stored autoboot ROM */
-
 #define SNES_CMD_DELETE_SRM          (0x1C) /* delete SRM save file for selected ROM */
 #define SNES_CMD_TOGGLE_CHT          (0x1D) /* MCU_PARAM low byte: cheat index. XORs flag bit in PSRAM record. */
 #define SNES_CMD_LOAD_CHT_FAV        (0x1E) /* MCU_PARAM low byte: favorite index. Resolve path via cfg_get_favorite_game then cheat_yaml_load. */
@@ -66,6 +65,8 @@
 #define SNES_CMD_DELETE_SRM_RECENT   (0x28) /* MCU_PARAM low byte: recent index. Resolve path via LAST_FILE, delete only the .srm (ROM stays in recents). */
 #define SNES_CMD_LOAD_CHT_RECENT     (0x29) /* MCU_PARAM low byte: recent index. Resolve path via LAST_FILE then cheat_yaml_load. */
 #define SNES_CMD_SAVE_CHT_RECENT     (0x2a) /* MCU_PARAM low byte: recent index. Resolve path via LAST_FILE then cheat_yaml_save. */
+#define SNES_CMD_SET_MENU_SPC        (0x2b) /* selected .spc (any visible folder): get_selected_name -> store full path in CFG.bgm_name, enable music, restart BGM in place */
+#define SNES_CMD_CLR_MENU_SPC        (0x2c) /* clear CFG.bgm_name -> revert menu BGM to the /sd2snes/menu.spc fallback */
 
 
 #define SNES_CMD_SAVESTATE           (0x40)

@@ -16,8 +16,8 @@
    resizing a field can never silently desync the menu from the firmware. */
 
 _Static_assert(offsetof(cfg_t, patch_verify_integrity) == 0xB8, "cfg_t.patch_verify_integrity must stay at CFG_ADDR+$B8");
-_Static_assert(offsetof(cfg_t, covers_in_lists) == 0xBA, "cfg_t.covers_in_lists must stay at CFG_ADDR+$BA");
 _Static_assert(offsetof(cfg_t, enable_menu_sfx) == 0xBB, "cfg_t.enable_menu_sfx must stay at CFG_ADDR+$BB");
+_Static_assert(offsetof(cfg_t, bgm_name) == 0xBC, "cfg_t.bgm_name must stay at CFG_ADDR+$BC");
 
 
 cfg_t CFG_DEFAULT = {
@@ -61,8 +61,8 @@ cfg_t CFG_DEFAULT = {
   .enable_autosave_msu1 = 1,
   .enable_menu_music = 1,
   .patch_verify_integrity = 0,
-  .enable_menu_sfx = 1
-
+  .enable_menu_sfx = 1,
+  .bgm_name = ""
 };
 
 cfg_t CFG;
@@ -170,8 +170,8 @@ int cfg_save() {
   f_printf(&file_handle, "%s: %s\n", CFG_PATCH_VERIFY_INTEGRITY, CFG.patch_verify_integrity ? "true" : "false");
   f_printf(&file_handle, "#  %s: Play menu navigation sound effects (cursor/confirm/back/error)\n", CFG_ENABLE_MENU_SFX);
   f_printf(&file_handle, "%s: %s\n", CFG_ENABLE_MENU_SFX, CFG.enable_menu_sfx ? "true" : "false");
-
-
+  f_printf(&file_handle, "\n#  %s: Full path of the chosen menu background-music .spc (\"\" = /sd2snes/menu.spc fallback)\n", CFG_MENU_MUSIC_FILE);
+  f_printf(&file_handle, "%s: %s\n", CFG_MENU_MUSIC_FILE, (char*)CFG.bgm_name);
   file_close();
   return err;
 }
@@ -313,6 +313,10 @@ int cfg_load() {
 
     if(yaml_get_itemvalue(CFG_ENABLE_MENU_SFX, &tok)) {
       CFG.enable_menu_sfx = tok.boolvalue ? 1 : 0;
+    }
+    if(yaml_get_itemvalue(CFG_MENU_MUSIC_FILE, &tok)) {
+      strncpy((char*)CFG.bgm_name, tok.stringvalue, sizeof(CFG.bgm_name) - 1);
+      CFG.bgm_name[sizeof(CFG.bgm_name) - 1] = 0;
     }
   }
   yaml_file_close();
