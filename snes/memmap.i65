@@ -20,7 +20,10 @@
                                               FPGA region, which is NOT cleared by clear_wram and
                                               survives a reset, so coldboot explicitly zeroes it
                                               (main.a65) -- every non-warm reset lands in coldboot.
-                                              0=not loaded (reload), 1=playing, 2=tried-no-spc. */
+                                              0=not loaded (reload), 1=playing, 2=tried-no-spc,
+                                              3=music off + DSP-unmute stub running (keeps the
+                                              cart MSU-1 DAC audible for the menu sound effects),
+                                              4=tried-no-spc + DSP-unmute stub running. */
 
 #define BRAM_PAYLOAD                $002A10
 #define BRAM_RETURN_VECTOR          $002A6C
@@ -110,6 +113,7 @@
 #define CMD_DELETE_SRM_RECENT       $28 /* MCU_PARAM low byte: recent index. Delete only the .srm (ROM stays in recents). */
 #define CMD_LOAD_CHT_RECENT         $29 /* MCU_PARAM low byte: recent index. Resolves path via LAST_FILE then cheat_yaml_load. */
 #define CMD_SAVE_CHT_RECENT         $2A /* MCU_PARAM low byte: recent index. Resolves path via LAST_FILE then cheat_yaml_save. */
+#define SFX_MAILBOX                 $002BE0 /* fork: menu sound effects mailbox (sfx.a65 <-> MCU menu loop). Value = effect+1 (1-4: cursor/confirm/back/error), 0 = consumed. DEDICATED byte: sharing MCU_CMD raced the real commands. NOT $2A08: MCU_PARAM is a 12-BYTE region ($2A04-$2A0F, settime writes +11) - parking there corrupted cover requests and saved garbled favorites. $2BE0 sits in the unreferenced $2BB4-$2BEF gap. Newest-wins, fire-and-forget. */
 
 
 #define IPS_LIST                    $FF5000  /* IPS patch list written by MCU */
@@ -172,6 +176,7 @@
 #define CFG_ENABLE_AUTOSAVE_MSU1        CFG_ADDR+$00B5
 #define CFG_PATCH_VERIFY_INTEGRITY      CFG_ADDR+$00B8
 #define CFG_ENABLE_MENU_MUSIC           CFG_ADDR+$00B9
+#define CFG_ENABLE_MENU_SFX             CFG_ADDR+$00BB
 
 #define MENU_ENTRY_SIZE             23
 
