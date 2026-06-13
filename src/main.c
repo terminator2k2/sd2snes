@@ -327,6 +327,7 @@ int main(void) {
 
 
     uint8_t cmd = 0;
+	uint8_t menu_reload = 0; 
     uint64_t btime = 0;
     uint32_t filesize=0;
     printf("test sram\n");
@@ -776,6 +777,7 @@ int main(void) {
           break;
       }
     }
+	if(menu_reload) continue;
     printf("loaded %lu bytes\n", filesize);
     printf("cmd was %x, going to snes main loop\n", cmd);
 
