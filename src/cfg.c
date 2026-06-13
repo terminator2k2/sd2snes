@@ -310,7 +310,7 @@ int cfg_load() {
     }
     if(yaml_get_itemvalue(CFG_PATCH_VERIFY_INTEGRITY, &tok)) {
       CFG.patch_verify_integrity = tok.boolvalue ? 1 : 0;
-
+    }
     if(yaml_get_itemvalue(CFG_ENABLE_MENU_SFX, &tok)) {
       CFG.enable_menu_sfx = tok.boolvalue ? 1 : 0;
     }
