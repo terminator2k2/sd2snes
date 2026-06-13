@@ -100,7 +100,6 @@
 #define CMD_SET_AUTOBOOT_RECENT     $19
 #define CMD_CLR_AUTOBOOT_ROM        $1a /* clear autoboot ROM setting */
 #define CMD_LOAD_AUTOBOOT           $1b /* trigger autoboot at cold boot */
-<<<<<<< HEAD
 #define CMD_DELETE_SRM              $1C /* delete SRM save file for selected ROM */
 #define CMD_TOGGLE_CHT              $1D /* MCU_PARAM low byte: cheat index. MCU XORs the flag bit in PSRAM record. */
 #define CMD_LOAD_CHT_FAV            $1E /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_load. */
