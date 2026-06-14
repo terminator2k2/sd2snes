@@ -1,4 +1,4 @@
-<h1> sd2snes+</h1>
+<h1> sd2snes</h1>
 
 ## What This Fork Adds
 
