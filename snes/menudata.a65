@@ -1015,18 +1015,7 @@ menu_enttab_filesel_context_spc:
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0
- .byt  MTYPE_FUNC_CLOSE
- .word !text_filesel_context_add_to_favorites
- .byt  ^text_filesel_context_add_to_favorites
- .word !add_selected_file_to_favorites-1
- .byt  ^add_selected_file_to_favorites-1
- .byt  0
- .byt  0,0,0
- .word !mdesc_filesel_context_add_to_favorites
- .byt  ^mdesc_filesel_context_add_to_favorites
- .byt  0,0,0
- .byt  0,0,0
- .byt  0,0,0
+
 
  .byt  MTYPE_FUNC_CLOSE
  .word !text_filesel_context_delete_file
@@ -1084,6 +1073,19 @@ menu_enttab_filesel_context_st_file:
  .byt  0,0,0
  .word !mdesc_filesel_context_set_as_slotb
  .byt  ^mdesc_filesel_context_set_as_slotb
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+ 
+  .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_delete_file
+ .byt  ^text_filesel_context_delete_file
+ .word !delete_selected_file-1
+ .byt  ^delete_selected_file-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_delete_file
+ .byt  ^mdesc_filesel_context_delete_file
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0
