@@ -677,7 +677,6 @@ int main(void) {
           delete_listed_game_srm(LAST_FILE, "recent");
           cmd=0;
           break;
-        }
         case SNES_CMD_SET_MENU_SPC:
           /* a .spc was picked in the browser (any visible folder) to become the menu
              background music. MCU_PARAM was set up like LOADROM (cwd + selected entry)
