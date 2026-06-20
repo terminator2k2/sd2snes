@@ -483,6 +483,20 @@ menu_enttab_chip:
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0
+ 
+ .byt  MTYPE_VALUE
+ .word !mtext_chip_cc_time_limit
+ .byt  ^mtext_chip_cc_time_limit
+ .word !kv_cc_time_limit
+ .byt  ^kv_cc_time_limit
+ .byt  OPTTYPE_KVBYTE
+ .word !CFG_CC_TIME_LIMIT
+ .byt  ^CFG_CC_TIME_LIMIT
+ .word !mdesc_chip_cc_time_limit
+ .byt  ^mdesc_chip_cc_time_limit
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
 
  .byt 0
 
@@ -1252,6 +1266,12 @@ kv_cx4_speed:
 kv_gsu_speed:
 .word $0000, !text_normal : .byt ^text_normal
 .word $0001, !text_fast : .byt ^text_fast
+.word $ffff
+
+kv_cc_time_limit:
+.word $0000, !text_3min : .byt ^text_3min
+.word $0001, !text_5min : .byt ^text_5min
+.word $0002, !text_10min : .byt ^text_10min
 .word $ffff
 
 kv_sgb_clock:
