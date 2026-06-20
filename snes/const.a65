@@ -241,6 +241,7 @@ mtext_ingame_autosave_msu1        .byt " ",129,"MSU-1 Autosave", 0
 mtext_chip_cx4_speed              .byt "Cx4 speed", 0
 mtext_chip_gsu_speed              .byt "SuperFX speed", 0
 mtext_chip_msu1_volume_boost      .byt "MSU-1 volume boost", 0
+mtext_chip_cc_time_limit          .byt "Comp. Cart Time", 0
 
 mdesc_mm_last                     .byt "Show up to 10 most recently played games", 0
 mdesc_mm_favorites                .byt "Show up to 20 favorite games", 0
@@ -298,6 +299,7 @@ mdesc_cx4_speed_fast              .byt "Run as fast as possible", 0
 mdesc_cx4_speed_normal            .byt "Run at approx. original speed", 0
 mdesc_gsu_speed_fast              .byt "Run as fast as possible", 0
 mdesc_gsu_speed_normal            .byt "Run at approx. original speed", 0
+mdesc_chip_cc_time_limit          .byt "Competition Cart time limit", 0
 
 text_filesel_selected_file .byt "Selected file", 0
 text_filesel_context_add_to_favorites .byt "Add to favorites", 0
