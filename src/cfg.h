@@ -63,6 +63,8 @@
 #define CFG_ENABLE_MENU_SFX              ("EnableMenuSFX")
 #define CFG_MENU_MUSIC_FILE              ("MenuMusicFile")
 #define CFG_SORT_FAVORITES               ("SortFavorites")
+#define CFG_CC_TIME_LIMIT                ("CCTimeLimit")
+
 
 
 typedef enum {
@@ -120,6 +122,7 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
   uint8_t  enable_menu_sfx;         /* CFG @ $BB: menu navigation sound effects (MSU-1 DAC, /sd2snes/sfx_*.pcm) */
   uint8_t  bgm_name[128];           /* CFG @ $BC: full SD path of the chosen background-music .spc ("" = use /sd2snes/menu.spc fallback) */
   uint8_t  sort_favorites;          /* CFG @ $13C: show the Favorites list alphabetically (display-only; the .cfg keeps recency order) */
+  uint8_t  cc_time_limit;           /* Competition Cart time limit (0: 3min, 1: 5min, 2: 10min) */
 } cfg_t;
 
 int cfg_save(void);
