@@ -209,6 +209,26 @@ reg [3:0] SNES_SNOOPPARD_count;
 reg [7:0] CTX_DINr;
 reg       CTX_DIRr;
 
+reg [7:0] CC_DR;
+initial CC_DR = 8'h00;
+
+wire cc_sel;
+reg [7:0] CC_SR;
+initial CC_SR = 8'h00;
+
+reg CC_TM_ON;
+initial CC_TM_ON = 1'b0;
+reg [4:0] CC_TM_CNT;
+initial CC_TM_CNT = 5'b0;
+reg [32:0] CC_TM_DIV;
+initial CC_TM_DIV = 33'b0;
+
+localparam [32:0] CLK_FREQ_HZ = 33'd96000000;
+localparam [32:0] ONE_MINUTE  = CLK_FREQ_HZ * 60;
+
+localparam FEAT_CC92 = 14;
+localparam FEAT_PF94 = 15;
+
 // early signals for snooping bus
 wire SNES_PAWR_start_early = ((SNES_PAWRr[4:1] | SNES_PAWRr[5:2]) == 4'b1110);
 wire SNES_RD_start_early = ((SNES_READr[6:1] | SNES_READr[7:2]) == 6'b111100);
@@ -660,6 +680,7 @@ address snes_addr(
   .SAVERAM_BASE(SAVERAM_BASE),
   .SAVERAM_MASK(SAVERAM_MASK),
   .ROM_MASK(ROM_MASK),
+  .CC_DR(CC_DR),
   .map_unlock(map_unlock),
   .map_Ex_rd_unlock(map_Ex_rd_unlock_r),
   .map_Ex_wr_unlock(map_Ex_wr_unlock_r),
@@ -683,7 +704,8 @@ address snes_addr(
   .branch2_enable(branch2_enable),
   .branch3_enable(branch3_enable),
   .exe_enable(exe_enable),
-  .map_enable(map_enable)
+  .map_enable(map_enable),
+  .cc_sel(cc_sel)
 );
 
 // flop all snes_addr outputs
@@ -749,6 +771,60 @@ wire snoop_4200_enable = {SNES_ADDR[22], SNES_ADDR[15:0]} == 17'h04200;
 wire r4016_enable = {SNES_ADDR[22], SNES_ADDR[15:0]} == 17'h04016;
 
 always @(posedge CLK2) begin
+  if(SNES_reset_strobe) begin
+    CC_DR <= 8'h00;
+  end else if(SNES_WR_end) begin
+    // CC92: write window C0-CF/E0-EF with CA[21]=1
+    if(featurebits[FEAT_CC92] &&
+   (SNES_ADDR[23:20] == 4'hC || SNES_ADDR[23:20] == 4'hE) && SNES_ADDR[21])
+      CC_DR <= SNES_DATA_IN;
+    // PF94: write window 10-2F/90-AF:6000-7FFF
+    else if(featurebits[FEAT_PF94]
+        && (SNES_ADDR[23:20] == 4'h1 ||
+            SNES_ADDR[23:20] == 4'h2 ||
+            SNES_ADDR[23:20] == 4'h9 ||
+            SNES_ADDR[23:20] == 4'hA)
+        && SNES_ADDR[21]
+        && SNES_ADDR[15:13] == 3'b011)
+  CC_DR <= SNES_DATA_IN;
+  end
+end
+
+always @(posedge CLK2) begin
+  if(SNES_reset_strobe) begin
+    CC_TM_ON  <= 1'b0;
+    CC_TM_CNT <= 5'b0;
+    CC_TM_DIV <= 33'b0;
+    CC_SR     <= 8'h00;
+  end else begin
+    if(CC_TM_ON) begin
+      CC_TM_DIV <= CC_TM_DIV + 1;
+
+      if(CC_TM_DIV == ONE_MINUTE-1) begin
+        CC_TM_DIV <= 33'b0;
+
+        if(CC_TM_CNT == 5'b0) begin
+          CC_SR[1] <= 1'b1;
+          CC_TM_ON <= 1'b0;
+        end else begin
+          CC_TM_CNT <= CC_TM_CNT - 1;
+        end
+      end
+    end
+
+    if(SNES_WR_end) begin
+      if((featurebits[FEAT_CC92] || featurebits[FEAT_PF94])
+         && cc_sel && SNES_ADDR[21] && SNES_DATA_IN == 8'h09) begin
+        CC_TM_ON  <= 1'b1;
+        CC_TM_CNT <= dsp_feat[12:8] - 1;
+        CC_TM_DIV <= 33'b0;
+        CC_SR     <= 8'h00;
+      end
+    end
+  end
+end
+
+always @(posedge CLK2) begin
   r2100_forcewrite <= r2100_forcewrite_pre;
 end
 
@@ -775,12 +851,12 @@ assign SNES_DATA = (r213f_enable & ~SNES_PARD) ? (r213f_forceread ? 8'bZ : r213f
                    :(r2100_enable & ~SNES_PAWR & r2100_forcewrite) ? r2100r
                    :(((~SNES_READ & ((~SNES_SNOOPPAWR_DATA_OE & ~SNES_SNOOPPARD_DATA_OE) | ~SNES_ROMSEL_EARLY)))
                                 & ~(r2100_enable & ~SNES_PAWR & ~r2100_forcewrite & ~IS_ROM & ~IS_WRITABLE))
-                                ? (dspx_enable ? DSPX_SNES_DATA_OUT
+                                ? (cc_sel ? CC_SR
+                                  :dspx_enable ? DSPX_SNES_DATA_OUT
                                   :dspx_dp_enable ? DSPX_SNES_DATA_OUT
                                   :msu_enable ? MSU_SNES_DATA_OUT
                                   :dma_enable ? DMA_SNES_DATA_OUT
                                   :(cheat_hit & ~feat_cmd_unlock) ? cheat_data_out
-                                  // put spinloop below cheat so we don't overwrite jmp target after NMI
                                   :loop_enable ? loop_data
                                   :((snescmd_unlock | feat_cmd_unlock | map_snescmd_rd_unlock_r) & snescmd_enable) ? snescmd_dout
                                   :(ROM_ADDR0 ? ROM_DATA[7:0] : ROM_DATA[15:8])
@@ -1150,7 +1226,7 @@ assign ROM_BLE = ~ROM_ADDR0 & ~(~SD_DMA_TO_ROM & CTX_HIT & CTX_ROM_WORDr) & ~(~S
 
 reg ReadOrWrite_r; always @(posedge CLK2) ReadOrWrite_r <= ~(SNES_READr[1] & SNES_READr[0] & SNES_WRITEr[1] & SNES_WRITEr[0]);
 
-assign SNES_DATABUS_OE = ((dspx_enable | dspx_dp_enable) & ReadOrWrite_r) ? 1'b0 :
+assign SNES_DATABUS_OE = ((cc_sel | dspx_enable | dspx_dp_enable) & ReadOrWrite_r) ? 1'b0 :
                          (msu_enable & ReadOrWrite_r) ? 1'b0 :
                          (dma_enable & ReadOrWrite_r) ? 1'b0 :
                          (loop_enable & ~SNES_READ_narrow) ? 1'b0 :
