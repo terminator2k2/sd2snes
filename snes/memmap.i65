@@ -182,6 +182,7 @@
 #define CFG_ENABLE_MENU_SFX             CFG_ADDR+$00BB
 #define CFG_MENU_MUSIC_FILE             CFG_ADDR+$00BC
 #define CFG_SORT_FAVORITES              CFG_ADDR+$013C
+#define CFG_CC_TIME_LIMIT               CFG_ADDR+$013D
 
 #define MENU_ENTRY_SIZE             23
 #define FAV_VISMAX                  13 /* max favorites rows shown at once (window at last_win_y=12 -> rows 12..26, status bar 27); the rest scroll */
