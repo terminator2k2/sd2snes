@@ -83,6 +83,32 @@ uint8_t checkChksum(uint16_t cchk, uint16_t chk) {
   return res;
 }
 
+/* Competition Cart ROM fingerprints (matched at LoROM header offset 0x7FC0) */
+static const uint8_t snes_cc92_header[32] = {
+    0x00, 0x08, 0x22, 0x02, 0x1C, 0x00, 0x10, 0x00,
+    0x08, 0x65, 0x80, 0x84, 0x20, 0x00, 0x22, 0x25,
+    0x00, 0x83, 0x0C, 0x80, 0x10, 0x00, 0x00, 0xA0,
+    0x80, 0x01, 0x80, 0x80, 0x00, 0x01, 0x02, 0x2D
+};
+static const uint8_t snes_pf94_10k_header[32] = {
+    0xC9, 0x80, 0x80, 0x44, 0x15, 0x00, 0x62, 0x09,
+    0x29, 0xA0, 0x52, 0x70, 0x50, 0x12, 0x05, 0x35,
+    0x31, 0x63, 0xC0, 0x22, 0x01, 0x80, 0xC2, 0x3A,
+    0x6C, 0xB0, 0xE8, 0x4A, 0x11, 0x20, 0xC0, 0xF8
+};
+static const uint8_t snes_pf94_1m_header[64] = {
+    0x50, 0x52, 0x45, 0x48, 0x49, 0x53, 0x54, 0x4F,
+    0x52, 0x49, 0x4B, 0x20, 0x4D, 0x41, 0x4E, 0x20,
+    0x20, 0x20, 0x20, 0x20, 0x20, 0x30, 0x00, 0x0A,
+    0x00, 0x01, 0x33, 0x00, 0xFF, 0xFF, 0x00, 0x00,
+    0xFF, 0xFF, 0xFF, 0xFF, 0x2B, 0x80, 0x2B, 0x80,
+    0x2B, 0x80, 0xFE, 0x91, 0x2B, 0x80, 0xA4, 0xF7,
+    0xFF, 0xFF, 0xFF, 0xFF, 0x2B, 0x80, 0x2B, 0x80,
+    0x2B, 0x80, 0x75, 0xF7, 0x00, 0x80, 0xA4, 0xF7
+};
+
+static const uint8_t cc_minutes_table[] = {3, 5, 10};
+
 void smc_id(snes_romprops_t* props, uint32_t file_offset) {
   uint8_t score, maxscore=1, score_idx=2; /* assume LoROM */
   uint8_t ext_coprocessor=0;
@@ -122,6 +148,70 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
       props->mapper_id        = 5; /* Sufami Turbo */
       printf("Sufami Turbo: ROM=%ldKB SRAM=%ldKB\n",
              sz >> 10, props->sramsize_bytes >> 10);
+      return;
+    }
+  }
+  /* Campus Challenge '92 / PowerFest '94 detection */
+  {
+    uint8_t cc_hdr[64];
+    smc_readblock(cc_hdr, 0x7FC0, sizeof(cc_hdr), file_offset);
+    if(!memcmp(cc_hdr, snes_cc92_header, 32)) {
+      props->load_address     = 0;
+      props->offset           = 0;
+      props->has_dspx         = 1;
+      props->dsp_fw           = DSPFW_1B;
+      props->fpga_conf        = FPGA_DSP;
+      props->fpga_features    = FEAT_DSPX | FEAT_CC92;
+      props->fpga_dspfeat     = 4 | ((uint16_t)cc_minutes_table[CFG.cc_time_limit > 2 ? 0 : CFG.cc_time_limit] << 8);
+      props->has_st0010       = 0;
+      props->has_st0011       = 0;
+      props->has_st0018       = 0;
+      props->has_msu1         = 0;
+      props->has_spc7110      = 0;
+      props->has_cx4          = 0;
+      props->has_obc1         = 0;
+      props->has_gsu          = 0;
+      props->has_sa1          = 0;
+      props->has_sdd1         = 0;
+      props->has_combo        = 0;
+      props->srambase         = 0;
+      props->romsize_bytes    = 0x200000;  /* round up to 2MB */
+      props->ramsize_bytes    = 8192;   /* ramsz=3 -> 1<<(10+3) = 8KB */
+      props->sramsize_bytes   = props->ramsize_bytes;
+      props->expramsize_bytes = 0;
+      props->region           = 0;
+      props->mapper_id        = 1;      /* LoROM base, CC92 via featurebits */
+      printf("Campus Challenge '92 detected\n");
+      return;
+    }
+    if(!memcmp(cc_hdr, snes_pf94_10k_header, 32) ||
+       !memcmp(cc_hdr, snes_pf94_1m_header, 64)) {
+      props->load_address     = 0;
+      props->offset           = 0;
+      props->has_dspx         = 1;
+      props->dsp_fw           = DSPFW_1B;
+      props->fpga_conf        = FPGA_DSP;
+      props->fpga_features    = FEAT_DSPX | FEAT_PF94;
+      props->fpga_dspfeat     = 4 | ((uint16_t)cc_minutes_table[CFG.cc_time_limit > 2 ? 0 : CFG.cc_time_limit] << 8);
+      props->has_st0010       = 0;
+      props->has_st0011       = 0;
+      props->has_st0018       = 0;
+      props->has_msu1         = 0;
+      props->has_spc7110      = 0;
+      props->has_cx4          = 0;
+      props->has_obc1         = 0;
+      props->has_gsu          = 0;
+      props->has_sa1          = 0;
+      props->has_sdd1         = 0;
+      props->has_combo        = 0;
+      props->srambase         = 0;
+      props->romsize_bytes    = 0x400000;  /* round up to 4MB */
+      props->ramsize_bytes    = 8192;
+      props->sramsize_bytes   = props->ramsize_bytes;
+      props->expramsize_bytes = 0;
+      props->region           = 0;
+      props->mapper_id        = 1;      /* LoROM base, PF94 via featurebits */
+      printf("PowerFest '94 detected\n");
       return;
     }
   }
