@@ -162,7 +162,7 @@ int cfg_save() {
   f_printf(&file_handle, "%s: %d\n", CFG_GSU_SPEED, CFG.gsu_speed);
   f_printf(&file_handle, "#  %s: MSU audio volume boost\n#    (0: none; 1: +3.5dBFS; 2: +6dBFS; 3: +9.5dBFS; 4: +12dBFS)\n", CFG_MSU_VOLUME_BOOST);
   f_printf(&file_handle, "%s: %d\n", CFG_MSU_VOLUME_BOOST, CFG.msu_volume_boost);
-  f_printf(&file_handle, "\n# Competition Cart time limit (0: 3 minutes, 1: 5 minutes, 2: 10 minutes)\n");
+  f_printf(&file_handle, "\n# Competition Cart time limit (0=3min, 1=4min, 2=5min ... 15=18min)\n");
   f_printf(&file_handle, "%s: %d\n", CFG_CC_TIME_LIMIT, CFG.cc_time_limit);
   f_puts("\n# Autosave (save SRAM contents to card when changes are detected)\n", &file_handle);
   f_printf(&file_handle, "#  %s: Autosave for everything except MSU-1 games\n", CFG_ENABLE_AUTOSAVE);
@@ -247,7 +247,7 @@ int cfg_load() {
       CFG.brightness_limit = tok.longvalue & 0xf;
     }
 	if(yaml_get_itemvalue(CFG_CC_TIME_LIMIT, &tok)) {
-      CFG.cc_time_limit = tok.longvalue > 2 ? 0 : (uint8_t)tok.longvalue;
+      CFG.cc_time_limit = tok.longvalue > 15 ? 0 : (uint8_t)tok.longvalue;
     }
     if(yaml_get_itemvalue(CFG_ENABLE_RST_TO_MENU, &tok)) {
       if(tok.type == YAML_BOOL) {
