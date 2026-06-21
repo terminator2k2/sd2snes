@@ -107,7 +107,7 @@ static const uint8_t snes_pf94_1m_header[64] = {
     0x2B, 0x80, 0x75, 0xF7, 0x00, 0x80, 0xA4, 0xF7
 };
 
-static const uint8_t cc_minutes_table[] = {3, 5, 10};
+static const uint8_t cc_minutes_table[] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18};
 
 void smc_id(snes_romprops_t* props, uint32_t file_offset) {
   uint8_t score, maxscore=1, score_idx=2; /* assume LoROM */
@@ -162,7 +162,7 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
       props->dsp_fw           = DSPFW_1B;
       props->fpga_conf        = FPGA_DSP;
       props->fpga_features    = FEAT_DSPX | FEAT_CC92;
-      props->fpga_dspfeat     = 4 | ((uint16_t)cc_minutes_table[CFG.cc_time_limit > 2 ? 0 : CFG.cc_time_limit] << 8);
+      props->fpga_dspfeat     = 4 | ((uint16_t)cc_minutes_table[CFG.cc_time_limit > 15 ? 0 : CFG.cc_time_limit] << 8);
       props->has_st0010       = 0;
       props->has_st0011       = 0;
       props->has_st0018       = 0;
@@ -192,7 +192,7 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
       props->dsp_fw           = DSPFW_1B;
       props->fpga_conf        = FPGA_DSP;
       props->fpga_features    = FEAT_DSPX | FEAT_PF94;
-      props->fpga_dspfeat     = 4 | ((uint16_t)cc_minutes_table[CFG.cc_time_limit > 2 ? 0 : CFG.cc_time_limit] << 8);
+      props->fpga_dspfeat     = 4 | ((uint16_t)cc_minutes_table[CFG.cc_time_limit > 15 ? 0 : CFG.cc_time_limit] << 8);
       props->has_st0010       = 0;
       props->has_st0011       = 0;
       props->has_st0018       = 0;
