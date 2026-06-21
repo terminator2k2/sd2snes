@@ -1270,8 +1270,21 @@ kv_gsu_speed:
 
 kv_cc_time_limit:
 .word $0000, !text_3min : .byt ^text_3min
-.word $0001, !text_5min : .byt ^text_5min
-.word $0002, !text_10min : .byt ^text_10min
+.word $0001, !text_4min : .byt ^text_4min
+.word $0002, !text_5min : .byt ^text_5min
+.word $0003, !text_6min : .byt ^text_6min
+.word $0004, !text_7min : .byt ^text_7min
+.word $0005, !text_8min : .byt ^text_8min
+.word $0006, !text_9min : .byt ^text_9min
+.word $0007, !text_10min : .byt ^text_10min
+.word $0008, !text_11min : .byt ^text_11min
+.word $0009, !text_12min : .byt ^text_12min
+.word $000a, !text_13min : .byt ^text_13min
+.word $000b, !text_14min : .byt ^text_14min
+.word $000c, !text_15min : .byt ^text_15min
+.word $000d, !text_16min : .byt ^text_16min
+.word $000e, !text_17min : .byt ^text_17min
+.word $000f, !text_18min : .byt ^text_18min
 .word $ffff
 
 kv_sgb_clock:
