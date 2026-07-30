@@ -226,6 +226,7 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
   props->has_cx4 = 0;
   props->has_obc1 = 0;
   props->has_gsu = 0;
+  props->has_fx3 = 0;
   props->has_sa1 = 0;
   props->has_sdd1 = 0;
   props->has_combo = 0;
@@ -358,6 +359,22 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
         props->fpga_dspfeat = CFG.gsu_speed;
         header->ramsize = header->expramsize & 0x7;
       }
+      /* FX3 (Reality Engine 2) LoROM - carttype 0x17, used by the 2025/2026
+       * Limited Run Games SNES DOOM release. Same coprocessor slot as GSU
+       * but with a different register window, ROM bank range, and timing,
+       * so it needs a distinct flag into the FPGA rather than reusing
+       * has_gsu's assumptions verbatim.
+       * Unlike stock GSU (SlowROM only, hence the strict map==0x20 check
+       * above), FX3 adds FastROM support, so accept map 0x20 OR 0x30 here -
+       * don't assume the header flags SlowROM. */
+      else if ((header->map & 0xef) == 0x20 && header->carttype == 0x17) {
+        props->has_gsu = 1;
+        props->has_fx3 = 1;
+        props->fpga_conf = FPGA_GSU;
+        /* bit0 = existing gsu_speed toggle, bit1 = FX3 mode select (gsu.v) */
+        props->fpga_dspfeat = CFG.gsu_speed | 0x02;
+        header->ramsize = header->expramsize & 0x7;
+      }
       break;
 
     case 0x21: /* HiROM */
@@ -463,7 +480,8 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
   props->region = (header->destcode <= 1 || header->destcode >= 13) ? 0 : 1;
 
   // adjust sram size for special cart types
-  if (  (props->has_gsu && (header->carttype != 0x15 && header->carttype != 0x1a))
+  if (  (props->has_gsu && (header->carttype != 0x15 && header->carttype != 0x1a
+                            && header->carttype != 0x17 && header->carttype != 0x18))
      || (props->has_sa1 && (header->carttype == 0x34)                            )
      ) {
     // no sram in ram

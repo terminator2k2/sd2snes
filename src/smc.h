@@ -85,6 +85,7 @@ typedef struct __attribute__ ((__packed__)) _snes_romprops {
   uint8_t has_cx4;            /* CX4 presence flag */
   uint8_t has_obc1;           /* OBC1 presence flag */
   uint8_t has_gsu;            /* GSU presence flag */
+  uint8_t has_fx3;            /* FX3 (Reality Engine 2) variant of the GSU slot */
   uint8_t has_sa1;            /* SA-1 presence flag */
   uint8_t has_sdd1;           /* S-DD1 presence flag */
   uint8_t has_spc7110;        /* SPC7110 presence flag */

@@ -442,6 +442,8 @@ gsu snes_gsu (
   .GO(GSU_GO),
   
   .SPEED(dsp_feat[0]),
+  .IS_FX3(IS_FX3),
+  .FASTROM(FASTROM_r),
   
   // State debug read interface
   .PGM_ADDR(GSU_PGM_ADDR), // [9:0]
@@ -539,9 +541,27 @@ mcu_cmd snes_mcu_cmd(
   .dsp_feat_out(dsp_feat)
 );
 
+// dsp_feat[0] = existing GSU speed toggle (CFG.gsu_speed), dsp_feat[1] = FX3 mode.
+// Only meaningful while the GSU coprocessor slot is actually loaded/active.
+wire IS_FX3 = dsp_feat[1];
+
+// FastROM state ($420D/MEMSEL, bit0 = FastROM enable). sd2snes has never
+// needed to track this anywhere - stock SuperFX/GSU carts are SlowROM-only
+// (see smc.c's cart-type detection), so this bus write was never relevant
+// for a GSU-family cart until FX3, which does use FastROM. $420D is in the
+// standard $42xx peripheral-address range exposed to the cart via SNES_PA/
+// PAWR, same mechanism already used for INIDISP snooping above.
+reg FASTROM_r = 1'b0;
+always @(posedge CLK2) begin
+  if (SNES_PAWR_start & (SNES_PA == 8'h0D)) begin
+    FASTROM_r <= SNES_DATA[0];
+  end
+end
+
 address snes_addr(
   .CLK(CLK2),
   .MAPPER(MAPPER),
+  .IS_FX3(IS_FX3),
   .featurebits(featurebits),
   .SNES_ADDR(SNES_ADDR), // requested address from SNES
   .SNES_PA(SNES_PA),

@@ -759,7 +759,14 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
     deassert_reset();
   }
   // loading a new rom implies the previous crc is no longer valid
-  sram_crc_valid = romprops.has_combo ? 1 : 0;
+  sram_crc_valid = (romprops.has_combo || romprops.has_fx3) ? 1 : 0; // skip the full-ROM CRC scan for FX3 carts: it exists only to
+  // support SramOffsetTable matching for legacy quirky-save-layout games
+  // (e.g. Yoshi's Island), which FX3 carts don't need - but the scan reads
+  // the entire ROM through the MCU's own SPI-based access to the shared
+  // PSRAM, one 64KB chunk per main-loop iteration (~64 iterations for a
+  // 4MB ROM), competing for PSRAM bus time with the SNES's own concurrent
+  // reads for the whole first ~1-2 seconds after boot - exactly the
+  // window where intro corruption was observed.
   sram_crc_init = 1;
   sram_crc_romsize = filesize - romprops.offset;
 
@@ -1051,7 +1058,14 @@ uint32_t calc_sram_crc(uint32_t base_addr, uint32_t size, uint32_t crc) {
     data = FPGA_RX_BYTE();
     if(get_snes_reset()) {
       crc_valid = 0;
-      sram_crc_valid = romprops.has_combo ? 1 : 0;
+      sram_crc_valid = (romprops.has_combo || romprops.has_fx3) ? 1 : 0; // skip the full-ROM CRC scan for FX3 carts: it exists only to
+      // support SramOffsetTable matching for legacy quirky-save-layout games
+      // (e.g. Yoshi's Island), which FX3 carts don't need - but the scan reads
+      // the entire ROM through the MCU's own SPI-based access to the shared
+      // PSRAM, one 64KB chunk per main-loop iteration (~64 iterations for a
+      // 4MB ROM), competing for PSRAM bus time with the SNES's own concurrent
+      // reads for the whole first ~1-2 seconds after boot - exactly the
+      // window where intro corruption was observed.
       sram_crc_init = 1;
       break;
     }
