@@ -2470,7 +2470,7 @@ always @(posedge CLK) begin
                 // earlier "extend to i<23" change was a speculative guess
                 // from an early spec screenshot that was never actually
                 // checked against the real implementation, and was wrong.
-                RAMBR_r <= 3'd0; // per Randal Linden: MERGE always leaves RAMBR at 0
+                RAMBR_r <= fx3_saved_rambr_r; //(restore whatever it was)
                 EXE_STATE <= ST_EXE_WAIT; // all (end-start+1)*18 blocks written
               end
               else begin
