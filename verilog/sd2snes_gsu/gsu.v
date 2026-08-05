@@ -1047,6 +1047,17 @@ always @(posedge CLK) begin
             RAM_STATE <= ST_RAM_ACCESS;
             ram_state_end_r <= ST_RAM_FETCH_END;
           end
+		  else if (stb_ram_wr_r) begin
+            ram_bus_wrq_r <= 1;
+            ram_bus_word_r <= 0;
+            ram_bus_addr_r <= stb_addr_r;
+            ram_bus_data_r <= stb_data_r;
+            ram_busy_r <= 1;
+            ram_word_r <= stb_word_r;
+            ram_wr_r <= 1;
+            RAM_STATE <= ST_RAM_ACCESS;
+            ram_state_end_r <= ST_RAM_STB_END;
+          end	
           else if (bmp_ram_rd_r) begin
             ram_bus_rrq_r <= 1;
             ram_bus_word_r <= 0;
