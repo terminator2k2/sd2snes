@@ -521,7 +521,13 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   if(flags & LOADROM_WITH_SRAM) {
     if(romprops.ramsize_bytes) {
       // powerslide relies on the init value to be 00.
-      sram_memset(SRAM_SAVE_ADDR, romprops.ramsize_bytes, romprops.has_gsu ? 0x00 : 0xFF);
+      // FX3 carts can address the full 512KB physical GSU RAM chip (see the
+      // FPGA-side RAMBR widening), but romprops.ramsize_bytes stays capped at
+      // 128KB - the header's ramsize field is only 3 bits wide. Without this,
+      // any FX3 GSU RAM usage beyond the first 128KB would start out
+      // uninitialized (whatever was previously in that physical chip) rather
+      // than zeroed, unlike the rest of GSU RAM.
+      sram_memset(SRAM_SAVE_ADDR, romprops.has_fx3 ? 0x80000 : romprops.ramsize_bytes, romprops.has_gsu ? 0x00 : 0xFF);
       if (romprops.sramsize_bytes) migrate_and_load_srm(filename, SRAM_SAVE_ADDR);
       /* file not found error is ok (SRM file might not exist yet) */
       if(file_res == FR_NO_FILE) file_res = 0;

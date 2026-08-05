@@ -236,8 +236,8 @@ always @(posedge CLK2) begin
   // synchronize to the SNES cycle to avoid reading partial interrupt vector
   //if (SNES_WR_end | SNES_RD_end) begin
   if (SNES_cycle_end) begin
-    GSU_RONr    <= GSU_RON & GSU_GO;
-    GSU_RANr    <= GSU_RAN & GSU_GO;
+    GSU_RONr    <= IS_FX3 ? 1'b0 : (GSU_RON & GSU_GO);
+    GSU_RANr    <= IS_FX3 ? 1'b0 : (GSU_RAN & GSU_GO);
   end
 end
 

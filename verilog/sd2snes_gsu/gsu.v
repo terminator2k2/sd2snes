@@ -688,7 +688,7 @@ always @(posedge CLK) begin
     PBR_r   <= 0;
     //ROMBR_r <= 0;
     //RAMBR_r <= 0;
-    SCBR_r  <= 0;
+    SCBR_r  <= IS_FX3 ? 8'h40 : 8'h00;
     SCMR_r  <= 0;
     COLR_r  <= 0;
     POR_r   <= 0;
@@ -1010,7 +1010,23 @@ always @(posedge CLK) begin
   else begin
     case (RAM_STATE)
       ST_RAM_IDLE: begin
-        if ((IS_FX3 | SCMR_RAN) & RAM_BUS_RDY & SFR_GO) begin
+        if (IS_FX3 & stb_ram_wr_r & RAM_BUS_RDY) begin
+          // FX3 Clear/MERGE write: confirmed against Randal Linden's ClearCharFx3
+          // (an unconditional memcpy, no RAN/GsuRamAccess/SFR.Running dependency).
+          // Gating this on SFR_GO or SCMR_RAN risked a deadlock if MERGE runs
+          // before the game has ever written SCMR (which is what sets RAN) --
+          // mirrors the fix already confirmed and shipped in the MiSTer core.
+          ram_bus_wrq_r <= 1;
+          ram_bus_word_r <= 0;
+          ram_bus_addr_r <= stb_addr_r;
+          ram_bus_data_r <= stb_data_r;
+          ram_busy_r <= 1;
+          ram_word_r <= stb_word_r;
+          ram_wr_r <= 1;
+          RAM_STATE <= ST_RAM_ACCESS;
+          ram_state_end_r <= ST_RAM_STB_END;
+        end
+        else if ((IS_FX3 | SCMR_RAN) & RAM_BUS_RDY & SFR_GO) begin
           if (exe_ram_rd_r) begin
             ram_bus_rrq_r <= 1;
             ram_bus_word_r <= 0;
@@ -1030,17 +1046,6 @@ always @(posedge CLK) begin
             ram_wr_r <= 0;
             RAM_STATE <= ST_RAM_ACCESS;
             ram_state_end_r <= ST_RAM_FETCH_END;
-          end
-          else if (stb_ram_wr_r) begin
-            ram_bus_wrq_r <= 1;
-            ram_bus_word_r <= 0;
-            ram_bus_addr_r <= stb_addr_r;
-            ram_bus_data_r <= stb_data_r;
-            ram_busy_r <= 1;
-            ram_word_r <= stb_word_r;
-            ram_wr_r <= 1;
-            RAM_STATE <= ST_RAM_ACCESS;
-            ram_state_end_r <= ST_RAM_STB_END;
           end
           else if (bmp_ram_rd_r) begin
             ram_bus_rrq_r <= 1;
@@ -2465,7 +2470,7 @@ always @(posedge CLK) begin
                 // earlier "extend to i<23" change was a speculative guess
                 // from an early spec screenshot that was never actually
                 // checked against the real implementation, and was wrong.
-                RAMBR_r <= fx3_saved_rambr_r; // restore the caller's bank
+                RAMBR_r <= 3'd0; // per Randal Linden: MERGE always leaves RAMBR at 0
                 EXE_STATE <= ST_EXE_WAIT; // all (end-start+1)*18 blocks written
               end
               else begin
@@ -2488,6 +2493,7 @@ always @(posedge CLK) begin
         if (op_complete) begin
           case (exe_opcode_r)
             `OP_STOP           : begin
+			  e2r_data_r <= e2r_data_pre_r;
               if (~stb_busy_r & ~SFR_RR) begin
                 // don't allow STOP to complete until the store buffer is flushed
                 EXE_STATE <= ST_EXE_WAIT;
