@@ -68,6 +68,16 @@ coldboot:       ; Regular, cold-start init
   jsr killdma
   jsr clear_wram
   jsr apu_ram_init
+  ; fork: apu_ram_init just put the S-SMP back at IPL, so nothing is playing.
+  ; Reset BGM_STATE so bgm_update reloads the menu music. EVERY non-warm reset
+  ; lands here (only our deliberate warm resets take the warmboot path), and the
+  ; $2A FPGA region is NOT touched by clear_wram, so without this a reset would
+  ; leave BGM_STATE=1 and the music would never restart. (snescom: no long stz.)
+  lda #$00
+  sta @BGM_STATE
+  ; fork: menu sound effects - start with an empty SFX mailbox ($2A region is
+  ; not touched by clear_wram; a stale value would play one ghost blip at boot).
+  sta @SFX_MAILBOX
   jsr waitblank
   jsr snes_init
   jsr setup_gfx
@@ -98,6 +108,16 @@ coldboot_bypass_autoboot:         ; clear autoboot flag, continue to menu
 coldboot_autoboot_out:
   jsr screen_on
   jsr filesel_init
+  ; If reset_to_menu >= 2 (Folder/Rom) AND this was a reset-to-menu (not cold power-on):
+  ; navigate to last game's directory and optionally pre-select the ROM.
+  sep #$20 : .as
+  lda @CFG_ENABLE_RST_TO_MENU
+  cmp #$02
+  bcc +                          ; < 2 → Off or On, skip nav
+  lda @ST_RESET_TO_MENU_ACTIVE
+  beq +                          ; not a reset-to-menu boot → skip nav
+  jsr filesel_nav_last
++
   sep #$20 : .as
   lda @ST_RTC_VALID
   beq +

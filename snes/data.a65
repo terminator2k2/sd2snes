@@ -101,6 +101,10 @@ listsel_max         .byt 0
 listsel_pickbutton  .byt 0
 listsel_dirty       .byt 0
 listsel_backup      .byt 0
+fav_top             .byt 0      ; favorites scroll: index of the first visible entry
+fav_visible         .byt 0      ; favorites scroll: rows on screen (min(count, FAV_VISMAX))
+fav_row_cnt         .byt 0      ; favorites scroll: favsel_draw_rows loop counter (temp)
+ips_idx_tmp         .byt 0      ; IPS menu: loop counter / result temp
 
 screen_dma_disable  .word 0
 
@@ -246,4 +250,33 @@ dbg_ptr         .word 0
 fade_speed      .byt 0
 fade_count      .byt 0
 idle_count      .word 0
+;-- cheat menu (see snes/cheatmenu.a65)
+cm_total        .word 0     ; total cheat count (16-bit, capped at 512 in r15)
+cm_visible      .word 0     ; rows currently drawn (1..CHEATS_PER_SCREEN). High byte always 0.
+cm_top          .word 0     ; index of first visible record. 16-bit, supports 0..511.
+cm_sel          .word 0     ; cursor offset within visible rows (0..cm_visible-1). High byte always 0.
+cm_tmp          .word 0     ; row counter for redraw. High byte always 0.
+cm_record_offs  .word 0     ; 16-bit offset within base bank
+cm_record_bank  .byt 0      ; bank byte for current record
+;-- horizontal description scroll, mirrors filesel direntry_xscroll
+cm_xscroll       .byt 0     ; current scroll offset of the SELECTED row (0..N)
+cm_xscroll_state .byt 0     ; $00 = idle, $01 = forward (right), $FF = backward
+cm_xscroll_wait  .byt 0     ; frame countdown before next scroll step
+cm_fits          .byt 0,0,0,0,0,0,0,0,0,0 ; per-row print_over flag from last description draw
+cm_fits_idx      .byt 0     ; cm_fits[] write index used during a redraw pass
+;-- r16: source of the current cheat menu session, so the LOAD/SAVE
+;-- wrappers know whether to address the file via FILESEL_CWD (filesel
+;-- context) or via favorite-index (favorites context).
+cm_source        .byt 0     ; $00 = filesel, $01 = favorite, $02 = recent
+cm_fav_idx       .byt 0     ; favorite list index for cm_source=$01
+cm_rec_idx       .byt 0     ; recent list index for cm_source=$02
+
+;-- delete-confirmation dialog (see confirm_delete in filesel.a65)
+confirm_sel         .byt 0   ; current option: $00 = No (default), $01 = Yes
+confirm_prompt_addr .word 0  ; prompt-line string pointer (resolved by hiprint)
+confirm_prompt_bank .byt 0
+confirm_name_addr   .word 0  ; file-name string pointer ($00 bank -> blank line)
+confirm_name_bank   .byt 0
+
+
 _END            .byt 0

@@ -28,6 +28,9 @@
 #include "sysinfo.h"
 #include "cfg.h"
 #include "savestate.h"
+#include "cheat.h"
+#include "patch.h"
+
 
 //usb
 #include "usb.h"
@@ -60,6 +63,111 @@ extern volatile snes_status_t STS;
 
 const char fwhdr[CONFIG_FW_HEADERSIZE] __attribute__ ((section(".fwhdr")));
 
+/* Drop any Recent/Favorite list entries whose ROM file no longer exists, then
+   re-publish both lists + status to the SNES.  Called after every ROM delete
+   (browser / favorites / recents) so a now-missing game can't linger in those
+   lists and hang the loader when opened.  The boot-time check (main) covers
+   files removed on a PC between sessions.  cfg_validity_check rewrites a .cfg
+   (keeping a .bak) only when something actually changed. */
+static void revalidate_game_lists(void) {
+  cfg_validity_check_listed_games(LAST_FILE);
+  STM.num_recent_games = cfg_dump_listed_games_for_snes(LAST_FILE, SRAM_LASTGAME_ADDR, 1);
+  cfg_validity_check_listed_games(FAVORITES_FILE);
+  STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR, 0);
+  status_load_to_menu();
+}
+
+/* Patch-aware Recents/Favorites: a list entry may be "<rom>\t<patch_basename>".
+   Given such a raw entry, recover the patch, stage it where load_rom() expects
+   it and arm ips_pending_index so the relaunch re-applies the patch (reusing the
+   same path as a normal LOADROM after ips_find_patches).  `entry` is truncated to
+   the bare base ROM path on return (ready to hand to load_rom).  A patch deleted
+   since launch degrades to a clean vanilla boot instead of failing. */
+static void stage_patch_from_entry(char *entry) {
+  char patchpath[256];
+  ips_pending_index = 0;
+  current_ips_srm_source[0] = '\0';
+  if(!cfg_parse_patch_entry(entry, patchpath, sizeof(patchpath))) {
+    return; /* no patch tag -> plain base ROM */
+  }
+  FILINFO fno;
+  fno.lfname = NULL;
+  if(f_stat((TCHAR*)patchpath, &fno) != FR_OK) {
+    printf("stage_patch: patch gone (%s) -> vanilla\n", patchpath);
+    return; /* patch deleted -> boot base vanilla */
+  }
+  strncpy((char*)current_ips_srm_source, patchpath, sizeof(current_ips_srm_source) - 1);
+  current_ips_srm_source[sizeof(current_ips_srm_source) - 1] = '\0';
+  /* Stage the patch path where patch_apply()/bps_probe_header() read it, exactly
+     as ips_find_patches() would have for a normal LOADROM (slot index 1). */
+  sram_writeblock(current_ips_srm_source, SRAM_IPS_LIST_ADDR + 512,
+                  (uint16_t)(strlen((char*)current_ips_srm_source) + 1));
+  ips_pending_index = 1;
+}
+
+/* Resolve the Recents/Favorites entry at the index in MCU_PARAM (low byte) to
+   the name its sidecar files (.srm/.yml) are keyed off: the PATCH for a
+   patched entry (consistent with in-game current_ips_srm_source), the base
+   ROM otherwise.  Raw entry lands in file_lfn; patchpath is caller scratch. */
+static char *listed_game_sidecar_source(const uint8_t *listfile,
+                                        char *patchpath, int size) {
+  cfg_get_listed_game_raw(listfile, file_lfn,
+                          listed_game_resolve_index(listfile, snes_get_mcu_param() & 0xff));
+  return cfg_parse_patch_entry((char*)file_lfn, patchpath, size)
+         ? patchpath : (char*)file_lfn;
+}
+
+/* DELETE_FILE_{FAV,RECENT}: for a PATCHED entry, delete only the patch
+   (.ips/.bps) and drop the list entry by index — the base ROM is shared and
+   must stay.  For a plain entry, delete the ROM; revalidate_game_lists() then
+   drops it from BOTH lists by file existence. */
+static void delete_listed_game_file(const uint8_t *listfile, const char *what) {
+  uint8_t idx = listed_game_resolve_index(listfile, snes_get_mcu_param() & 0xff);
+  char patchpath[256];
+  cfg_get_listed_game_raw(listfile, file_lfn, idx);
+  if(cfg_parse_patch_entry((char*)file_lfn, patchpath, sizeof(patchpath))) {
+    printf("Delete %s patch: %s\n", what, patchpath);
+    if(f_unlink((TCHAR*)patchpath) != FR_OK) {
+      snescmd_writebyte(0xaa, SNESCMD_SNES_CMD);
+    }
+    cfg_remove_listed_game(listfile, idx);
+  } else {
+    printf("Delete %s file: %s\n", what, file_lfn);
+    if(f_unlink((TCHAR*)file_lfn) != FR_OK) {
+      snescmd_writebyte(0xaa, SNESCMD_SNES_CMD);
+    }
+  }
+  revalidate_game_lists();
+}
+
+/* DELETE_SRM_{FAV,RECENT}: delete only the .srm for a list entry; the
+   ROM/patch (and the list entry itself) stay in place. */
+static void delete_listed_game_srm(const uint8_t *listfile, const char *what) {
+  uint8_t srmfile[256] = SAVE_BASEDIR;
+  char patchpath[256];
+  char *srmsrc = listed_game_sidecar_source(listfile, patchpath,
+                                            sizeof(patchpath));
+  printf("Delete SRM for %s: %s\n", what, srmsrc);
+  append_file_basename((char*)srmfile, srmsrc, ".srm", sizeof(srmfile));
+  printf("SRM path: %s\n", srmfile);
+  if(f_unlink((TCHAR*)srmfile) != FR_OK) {
+    snescmd_writebyte(0xaa, SNESCMD_SNES_CMD);
+  }
+}
+
+/* {LOAD,SAVE}_CHT_{FAV,RECENT}: load/save the cheat YAML for a list entry.
+   The SNES side rewrites MCU_PARAM with the list index right before sending
+   these, because the cheat toggle handler clobbers it. */
+static void listed_game_cheats(const uint8_t *listfile, const char *what,
+                               int save) {
+  char patchpath[256];
+  char *src = listed_game_sidecar_source(listfile, patchpath,
+                                         sizeof(patchpath));
+  printf("%s cheats for %s: %s\n", save ? "Save" : "Load", what, src);
+  if(save) cheat_yaml_save((uint8_t*)src);
+  else     cheat_yaml_load((uint8_t*)src);
+}
+
 void menu_cmd_readdir(void) {
   uint8_t path[256];
   SNES_FTYPE filetypes[16];
@@ -69,7 +177,13 @@ void menu_cmd_readdir(void) {
 printf("path=%s tgt=%06lx types=", path, tgt_addr);
 uart_puts_hex((char*)filetypes);
 uart_putc('\n');
-  scan_dir(path, tgt_addr, filetypes);
+  uint16_t n = scan_dir(path, tgt_addr, filetypes);
+  /* Hand the authoritative entry count back to the menu through the snescmd
+     param region (BRAM-backed, reliable to read from the SNES immediately).
+     The menu sets dirend_addr = n*4 from this instead of scanning the SDRAM dir
+     table at $C1 itself, which can read a stale/partial buffer in the short
+     window right after this write -> bogus short dirend -> broken pagination. */
+  snescmd_writeshort(n, SNESCMD_MCU_PARAM);
 }
 
 int main(void) {
@@ -198,8 +312,8 @@ int main(void) {
       cfg_validity_check_listed_games(FAVORITES_FILE);
     }
     if(fpga_config != FPGA_BASE) fpga_pgm((uint8_t*)FPGA_BASE);
-    STM.num_recent_games = cfg_dump_listed_games_for_snes(LAST_FILE, SRAM_LASTGAME_ADDR);
-    STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR);
+    STM.num_recent_games = cfg_dump_listed_games_for_snes(LAST_FILE, SRAM_LASTGAME_ADDR, 1);
+    STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR, 0);
     led_set_brightness(CFG.led_brightness);
 
     /* load menu */
@@ -219,6 +333,9 @@ int main(void) {
     uart_putcrlf();
 
     sram_writebyte(0, SRAM_CMD_ADDR);
+    /* menu sound effects: start with an empty SFX mailbox (dedicated byte,
+       outside the command handshake - see snes.c menu_main_loop) */
+    snescmd_writebyte(0, SNESCMD_SFX_MAILBOX);
 
     if((rtc_state = rtc_isvalid()) != RTC_OK) {
       printf("RTC invalid!\n");
@@ -269,8 +386,11 @@ int main(void) {
     }
     STM.autoboot_enabled = cfg_is_autoboot_enabled();
     status_load_to_menu();
+    STM.reset_to_menu_active = 0;  /* SRAM now holds the flag for the SNES; zero in RAM so later status_load_to_menu() calls don't re-broadcast it */
+
 
     uint8_t cmd = 0;
+	uint8_t menu_reload = 0; 
     uint64_t btime = 0;
     uint32_t filesize=0;
     printf("test sram\n");
@@ -293,11 +413,44 @@ int main(void) {
       uart_putc('-');
       switch(cmd) {
         case SNES_CMD_LOADROM:
+          /* Read the IPS patch index BEFORE get_selected_name so that the
+             MCU_PARAM+7 byte is not overwritten.  set_mcu_addr() only uses
+             the lower 24 bits, so the index byte at offset +7 is safe. */
+          ips_pending_index = snescmd_readbyte(SNESCMD_MCU_PARAM + 7);
           get_selected_name(file_lfn);
-          printf("Selected name: %s\n", file_lfn);
-          cfg_add_listed_game(LAST_FILE, file_lfn, true);
+          printf("Selected name: %s (patch idx=%d)\n", file_lfn, ips_pending_index);
+          /* Build the SRM-override path from the IPS file's full SD path. */
+          current_ips_srm_source[0] = '\0';
+          if(ips_pending_index > 0 && ips_pending_index <= IPS_MAX_PATCHES) {
+            sram_readstrn(current_ips_srm_source,
+                          SRAM_IPS_LIST_ADDR + 512
+                          + (uint32_t)(ips_pending_index - 1) * IPS_PATH_LEN,
+                          sizeof(current_ips_srm_source));
+            printf("Patch SRM source: %s\n", current_ips_srm_source);
+          }
+          /* Record into Recents AFTER the patch path is known.  For a patched
+             launch, store "<rom>\t<patch_basename>" so the list shows/relaunches
+             the patch (cfg_add_listed_game_patched appends the tag with bounded
+             strncat and dedups on the whole string; cwd qualification still
+             applies to the leading ROM part, and an over-long entry degrades to
+             base-only inside the helper). */
+          if(current_ips_srm_source[0]) {
+            const char *pbase = strrchr((char*)current_ips_srm_source, '/');
+            pbase = pbase ? pbase + 1 : (char*)current_ips_srm_source;
+            cfg_add_listed_game_patched(LAST_FILE, file_lfn, pbase, true);
+          } else {
+            cfg_add_listed_game(LAST_FILE, file_lfn, true);
+          }
           filesize = load_rom(file_lfn, SRAM_ROM_ADDR, LOADROM_WITH_SRAM | LOADROM_WITH_RESET | LOADROM_WAIT_SNES);
           break;
+        case SNES_CMD_QUERY_IPS_PATCHES: {
+          uint8_t qpath[256];
+          get_selected_name(qpath);
+          current_ips_srm_source[0] = '\0';
+          ips_find_patches(qpath, SRAM_IPS_LIST_ADDR);
+          cmd = 0; /* stay in menu loop */
+          break;
+        }
         case SNES_CMD_SETRTC:
           /* get time from RAM */
           btime = snescmd_gettime();
@@ -318,6 +471,15 @@ int main(void) {
           filesize = load_spc(file_lfn, SRAM_SPC_DATA_ADDR, SRAM_SPC_HEADER_ADDR);
           cmd=0; /* stay in menu loop */
           break;
+        case SNES_CMD_LOAD_MENU_SPC:
+          /* stage background menu music. Use the user-chosen .spc (CFG.bgm_name, a
+             full SD path set via SNES_CMD_SET_MENU_SPC) when present, otherwise fall
+             back to the fixed /sd2snes/menu.spc. load_spc is graceful: a missing/
+             too-small file zeroes the SPC header, which the menu detects and skips. */
+          filesize = load_spc((uint8_t*)(CFG.bgm_name[0] == '/' ? CFG.bgm_name : (uint8_t*)"/sd2snes/menu.spc"),
+                              SRAM_SPC_DATA_ADDR, SRAM_SPC_HEADER_ADDR);
+          cmd=0; /* stay in menu loop */
+          break;
         case SNES_CMD_RESET:
           /* process RESET request from SNES */
           printf("RESET requested by SNES\n");
@@ -325,15 +487,20 @@ int main(void) {
           cmd=0; /* stay in menu loop */
           break;
         case SNES_CMD_LOADLAST:
-          cfg_get_listed_game(LAST_FILE, file_lfn, snes_get_mcu_param() & 0xff);
+          /* read RAW so the "<rom>\t<patch>" tag survives the move-to-top, then
+             stage the patch (re-applied by load_rom) and load the base ROM. */
+          cfg_get_listed_game_raw(LAST_FILE, file_lfn, snes_get_mcu_param() & 0xff);
           printf("Selected name: %s\n", file_lfn);
           cfg_add_listed_game(LAST_FILE, file_lfn, true);
+          stage_patch_from_entry((char*)file_lfn);
           filesize = load_rom(file_lfn, SRAM_ROM_ADDR, LOADROM_WITH_SRAM | LOADROM_WITH_RESET | LOADROM_WAIT_SNES);
           break;
         case SNES_CMD_LOADFAVORITE:
-          cfg_get_listed_game(FAVORITES_FILE, file_lfn, snes_get_mcu_param() & 0xff);
+          cfg_get_listed_game_raw(FAVORITES_FILE, file_lfn,
+                                  listed_game_resolve_index(FAVORITES_FILE, snes_get_mcu_param() & 0xff));
           printf("Selected name: %s\n", file_lfn);
-          cfg_add_listed_game(LAST_FILE, file_lfn, true);
+          cfg_add_listed_game(LAST_FILE, file_lfn, true);   /* lands in recents too, tag intact */
+          stage_patch_from_entry((char*)file_lfn);
           filesize = load_rom(file_lfn, SRAM_ROM_ADDR, LOADROM_WITH_SRAM | LOADROM_WITH_RESET | LOADROM_WAIT_SNES);
           break;
 /*        case SNES_CMD_SET_ALLOW_PAIR:
@@ -367,6 +534,10 @@ int main(void) {
           cic_videomode(CFG.vidmode_menu);
           fpga_set_dac_boost(CFG.msu_volume_boost);
           cfg_save();
+          /* re-dump favorites so a just-toggled SortFavorites takes effect the next
+             time the list opens (the dump honors CFG.sort_favorites). */
+          STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR, 0);
+          status_load_to_menu();
           cmd=0; /* stay in menu loop */
           break;
         case SNES_CMD_LED_BRIGHTNESS:
@@ -377,28 +548,33 @@ int main(void) {
         case SNES_CMD_ADD_FAVORITE_ROM:
           get_selected_name(file_lfn);
           printf("Selected name: %s\n", file_lfn);
-          cfg_add_listed_game(FAVORITES_FILE, file_lfn, false);
-          STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR);
+          /* returns 1 ONLY when the list is full and the game is not already in it
+             (0 = added, <0 = write error).  Report just the full case to the menu so
+             it can show a "list full" popup; the dump+status sync below carry it. */
+          STM.favorites_full = (cfg_add_listed_game(FAVORITES_FILE, file_lfn, false) == 1);
+          STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR, 0);
           status_load_to_menu();
           cmd=0; /* stay in menu loop */
           break;
         case SNES_CMD_ADD_FAVORITE_RECENT:
-          cfg_get_listed_game(LAST_FILE, file_lfn, snes_get_mcu_param() & 0xff);
+          /* RAW so a patched recent carries its "<rom>\t<patch>" tag into Favorites. */
+          cfg_get_listed_game_raw(LAST_FILE, file_lfn, snes_get_mcu_param() & 0xff);
           printf("Selected name from recent: %s\n", file_lfn);
-          cfg_add_listed_game(FAVORITES_FILE, file_lfn, true);
-          STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR);
+          STM.favorites_full = (cfg_add_listed_game(FAVORITES_FILE, file_lfn, false) == 1);
+          STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR, 0);
           status_load_to_menu();
           cmd=0;
           break;
         case SNES_CMD_REMOVE_RECENT_ROM:
           cfg_remove_listed_game(LAST_FILE, snes_get_mcu_param() & 0xff);
-          STM.num_recent_games = cfg_dump_listed_games_for_snes(LAST_FILE, SRAM_LASTGAME_ADDR);
+          STM.num_recent_games = cfg_dump_listed_games_for_snes(LAST_FILE, SRAM_LASTGAME_ADDR, 1);
           status_load_to_menu();
           cmd=0;
-          break;
+          break; 
         case SNES_CMD_REMOVE_FAVORITE_ROM:
-          cfg_remove_listed_game(FAVORITES_FILE, snes_get_mcu_param() & 0xff);
-          STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR);
+          cfg_remove_listed_game(FAVORITES_FILE,
+                                 listed_game_resolve_index(FAVORITES_FILE, snes_get_mcu_param() & 0xff));
+          STM.num_favorite_games = cfg_dump_listed_games_for_snes(FAVORITES_FILE, SRAM_FAVORITEGAMES_ADDR, 0);
           status_load_to_menu();
           cmd=0; /* stay in menu loop */
           break;
@@ -410,8 +586,19 @@ int main(void) {
           status_load_to_menu();
           cmd=0; /* stay in menu loop */
           break;
+        case SNES_CMD_SET_SLOTB_ROM:
+          get_selected_name(file_lfn);
+          printf("Set Slot B ROM: %s\n", file_lfn);
+          strncpy(slotb_filename, (char*)file_lfn, 257);
+          slotb_filename[257] = 0;
+          status_load_to_menu();
+          cmd=0; /* stay in menu loop, non-persistent */
+          break;
         case SNES_CMD_SET_AUTOBOOT_FAV:
-          cfg_get_listed_game(FAVORITES_FILE, file_lfn, snes_get_mcu_param() & 0xff);
+          /* RAW so the patch tag is stored in autoboot.cfg (round-trips on NUL);
+             SNES_CMD_LOAD_AUTOBOOT re-applies the patch at boot. */
+          cfg_get_listed_game_raw(FAVORITES_FILE, file_lfn,
+                                  listed_game_resolve_index(FAVORITES_FILE, snes_get_mcu_param() & 0xff));
           printf("Set autoboot from favorite: %s\n", file_lfn);
           cfg_set_autoboot_rom(file_lfn);
           STM.autoboot_enabled = 1;
@@ -419,13 +606,13 @@ int main(void) {
           cmd=0; /* stay in menu loop */
           break;
         case SNES_CMD_SET_AUTOBOOT_RECENT:
-          cfg_get_listed_game(LAST_FILE, file_lfn, snes_get_mcu_param() & 0xff);
+          cfg_get_listed_game_raw(LAST_FILE, file_lfn, snes_get_mcu_param() & 0xff);
           printf("Selected name: %s\n", file_lfn);
           cfg_set_autoboot_rom(file_lfn);
           STM.autoboot_enabled = 1;
           status_load_to_menu();
           cmd=0; /* stay in menu loop */
-          break;
+          break; 
         case SNES_CMD_CLR_AUTOBOOT_ROM:
           printf("Clear autoboot ROM\n");
           cfg_clr_autoboot_rom();
@@ -434,10 +621,13 @@ int main(void) {
           cmd=0; /* stay in menu loop */
           break;
         case SNES_CMD_LOAD_AUTOBOOT:
+          ips_pending_index = 0;
+          current_ips_srm_source[0] = '\0';
           cfg_get_autoboot_rom(file_lfn);
           printf("Autobooting: %s\n", file_lfn);
           if(file_lfn[0]) {
-            cfg_add_listed_game(LAST_FILE, file_lfn, true);
+            cfg_add_listed_game(LAST_FILE, file_lfn, true);   /* keep the tag in recents */
+            stage_patch_from_entry((char*)file_lfn);          /* re-apply patch; truncates to base */
             filesize = load_rom(file_lfn, SRAM_ROM_ADDR, LOADROM_WITH_SRAM | LOADROM_WITH_RESET | LOADROM_WAIT_SNES);
             if(filesize) break; /* ROM loaded and SNES reset, exit menu loop */
           }
@@ -448,21 +638,120 @@ int main(void) {
           snescmd_writebyte(0xaa, SNESCMD_SNES_CMD);
           cmd=0;
           break;
+        case SNES_CMD_DELETE_FILE:
+          get_selected_name(file_lfn);
+          printf("Delete file: %s\n", file_lfn);
+          if(f_unlink((TCHAR*)file_lfn) != FR_OK) {
+            snescmd_writebyte(0xaa, SNESCMD_SNES_CMD);
+          }
+          /* the deleted ROM may also be in Recents/Favorites -> drop any now-dead
+             entries so they can't hang the loader when opened later. */
+          revalidate_game_lists();
+          cmd=0;
+          break;
+        case SNES_CMD_DELETE_SRM: {
+          uint8_t srmfile[256] = SAVE_BASEDIR;
+          get_selected_name(file_lfn);
+          printf("Delete SRM for: %s\n", file_lfn);
+          append_file_basename((char*)srmfile, (char*)file_lfn, ".srm", sizeof(srmfile));
+          printf("SRM path: %s\n", srmfile);
+          if(f_unlink((TCHAR*)srmfile) != FR_OK) {
+            snescmd_writebyte(0xaa, SNESCMD_SNES_CMD);
+          }
+          cmd=0;
+          break;
+	    }  
+        case SNES_CMD_DELETE_FILE_FAV:
+          delete_listed_game_file(FAVORITES_FILE, "favorite");
+          cmd=0;
+          break;
+        case SNES_CMD_DELETE_SRM_FAV:
+          delete_listed_game_srm(FAVORITES_FILE, "favorite");
+          cmd=0;
+          break;
+        case SNES_CMD_DELETE_FILE_RECENT:
+          delete_listed_game_file(LAST_FILE, "recent");
+          cmd=0;
+          break;
+        case SNES_CMD_DELETE_SRM_RECENT:
+          delete_listed_game_srm(LAST_FILE, "recent");
+          cmd=0;
+          break;
+        case SNES_CMD_SET_MENU_SPC:
+          /* a .spc was picked in the browser (any visible folder) to become the menu
+             background music. MCU_PARAM was set up like LOADROM (cwd + selected entry)
+             so get_selected_name yields the full SD path; store it, enable music, and
+             persist, then reload the menu (like SET_THEME). The cold reload re-syncs
+             SRAM via cfg_load_to_menu and starts the new BGM cleanly on boot -- the
+             only reliable way to (re)start the S-SMP (the in-place warm-reset path
+             black-screened: the warm boot leaves NMI off). */
+          get_selected_name(file_lfn);
+          strncpy((char*)CFG.bgm_name, (char*)file_lfn, sizeof(CFG.bgm_name) - 1);
+          CFG.bgm_name[sizeof(CFG.bgm_name) - 1] = 0;
+          CFG.enable_menu_music = 1;
+          cfg_save();
+          menu_reload = 1; /* leave loop -> outer loop reloads, boots into the new BGM */
+          break;
+        case SNES_CMD_CLR_MENU_SPC:
+          /* "Restore music": drop the chosen .spc so the BGM falls back to
+             /sd2snes/menu.spc, then reload the menu (like CLR_THEME). */
+          CFG.bgm_name[0] = 0;
+          cfg_save();
+          menu_reload = 1;
+          break;
         case SNES_CMD_LOAD_CHT:
-          /* load cheats */
+          /* load cheats from YAML file into PSRAM for the menu to edit.
+             Filename is provided by the menu via MCU_PARAM (path) plus
+             the selected directory entry, the same way the favorites
+             and autoboot handlers retrieve it. */
+          get_selected_name(file_lfn);
+          printf("Load cheats for: %s\n", file_lfn);
+          cheat_yaml_load(file_lfn);
           cmd=0; /* stay in menu loop */
           break;
         case SNES_CMD_SAVE_CHT:
-          /* save cheats */
-// XXX          cheat_save_from_menu()
+          /* save the (possibly edited) cheat records from PSRAM back
+             to the YAML file on the SD card. */
+          get_selected_name(file_lfn);
+          printf("Save cheats for: %s\n", file_lfn);
+          cheat_yaml_save(file_lfn);
           cmd=0; /* stay in menu loop */
           break;
+        case SNES_CMD_LOAD_CHT_FAV:
+          listed_game_cheats(FAVORITES_FILE, "favorite", 0);
+          cmd=0; /* stay in menu loop */
+          break;
+        case SNES_CMD_SAVE_CHT_FAV:
+          listed_game_cheats(FAVORITES_FILE, "favorite", 1);
+          cmd=0; /* stay in menu loop */
+          break;
+        case SNES_CMD_LOAD_CHT_RECENT:
+          listed_game_cheats(LAST_FILE, "recent", 0);
+          cmd=0; /* stay in menu loop */
+          break;
+        case SNES_CMD_SAVE_CHT_RECENT:
+          listed_game_cheats(LAST_FILE, "recent", 1);
+          cmd=0; /* stay in menu loop */
+          break;
+        case SNES_CMD_TOGGLE_CHT: {
+          /* toggle the enabled flag for the cheat at the index passed
+             in MCU_PARAM low two bytes (16-bit index, supports 0..511).
+             The MCU does the bit flip directly in the PSRAM cheat
+             record at $D00000+512*idx because the SNES menu mapper
+             makes that region read-only. */
+          uint32_t idx = snes_get_mcu_param() & 0xffff;
+          printf("Toggle cheat idx=%lu\n", (unsigned long)idx);
+          cheat_toggle_flag((int)idx);
+          cmd=0; /* stay in menu loop */
+          break;
+        }
         default:
           printf("unknown cmd: %d\n", cmd);
           cmd=0; /* unknown cmd: stay in loop */
           break;
       }
     }
+	if(menu_reload) continue;
     printf("loaded %lu bytes\n", filesize);
     printf("cmd was %x, going to snes main loop\n", cmd);
 
@@ -499,6 +788,7 @@ int main(void) {
       }
       uint8_t resetState = get_snes_reset_state();
       if(resetState == SNES_RESET_LONG) {
+        STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
         prepare_reset();
         break;
       } else {
@@ -526,6 +816,7 @@ int main(void) {
                 break;
               case SNES_CMD_RESET_TO_MENU:
                 usb_cmd = 0;
+                STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
                 prepare_reset();
                 goto snes_loop_out;
               case SNES_CMD_SAVESTATE:
@@ -557,3 +848,4 @@ int main(void) {
     /* else reset */
   }
 }
+

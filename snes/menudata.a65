@@ -228,6 +228,42 @@ menu_enttab_cfg:
  .byt  0,0,0
  .byt  0,0,0
 
+ .byt  MTYPE_SUBMENU
+ .word !mtext_cfg_patch
+ .byt  ^mtext_cfg_patch
+ .word !menu_enttab_patch
+ .byt  ^menu_enttab_patch
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_cfg_patch
+ .byt  ^mdesc_cfg_patch
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt 0
+
+; ---- Patch Options submenu (IPS/BPS soft-patching) ----
+menu_enttab_patch:
+; HEADER
+ .byt  1
+ .word !mtext_cfg_patch
+ .byt  ^mtext_cfg_patch
+; ENTRIES
+ .byt  MTYPE_VALUE
+ .word !mtext_patch_verify
+ .byt  ^mtext_patch_verify
+ .word !kv_onoff
+ .byt  ^kv_onoff
+ .byt  OPTTYPE_KVBYTE
+ .word !CFG_PATCH_VERIFY_INTEGRITY
+ .byt  ^CFG_PATCH_VERIFY_INTEGRITY
+ .word !mdesc_patch_verify
+ .byt  ^mdesc_patch_verify
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
  .byt 0
 
 menu_enttab_bsx:
@@ -329,6 +365,34 @@ menu_enttab_browser:
  .byt  0,0,0
  .byt  0,0,0
 
+ .byt  MTYPE_VALUE
+ .word !mtext_browser_menumusic
+ .byt  ^mtext_browser_menumusic
+ .word !kv_onoff
+ .byt  ^kv_onoff
+ .byt  OPTTYPE_KVBYTE
+ .word !CFG_ENABLE_MENU_MUSIC
+ .byt  ^CFG_ENABLE_MENU_MUSIC
+ .word !mdesc_browser_menumusic
+ .byt  ^mdesc_browser_menumusic
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_VALUE
+ .word !mtext_browser_menusfx
+ .byt  ^mtext_browser_menusfx
+ .word !kv_onoff
+ .byt  ^kv_onoff
+ .byt  OPTTYPE_KVBYTE
+ .word !CFG_ENABLE_MENU_SFX
+ .byt  ^CFG_ENABLE_MENU_SFX
+ .word !mdesc_browser_menusfx
+ .byt  ^mdesc_browser_menusfx
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
 ; .byt  MTYPE_VALUE
 ; .word !mtext_browser_screensaver_timeout
 ; .byt  ^mtext_browser_screensaver_timeout
@@ -342,6 +406,33 @@ menu_enttab_browser:
 ; .byt  0,0,0
 ; .byt  0,0,0
 ; .byt  0,0,0
+
+ .byt  MTYPE_VALUE
+ .word !mtext_browser_sortfav
+ .byt  ^mtext_browser_sortfav
+ .word !kv_onoff
+ .byt  ^kv_onoff
+ .byt  OPTTYPE_KVBYTE
+ .word !CFG_SORT_FAVORITES
+ .byt  ^CFG_SORT_FAVORITES
+ .word !mdesc_browser_sortfav
+ .byt  ^mdesc_browser_sortfav
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_FUNC
+ .word !mtext_browser_restoremusic
+ .byt  ^mtext_browser_restoremusic
+ .word !restore_music-1
+ .byt  ^restore_music-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_browser_restoremusic
+ .byt  ^mdesc_browser_restoremusic
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
 
  .byt 0
 
@@ -389,6 +480,20 @@ menu_enttab_chip:
  .byt  ^CFG_MSU_VOLUME_BOOST
  .word !mdesc_chip_msu1_volume_boost
  .byt  ^mdesc_chip_msu1_volume_boost
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+ 
+ .byt  MTYPE_VALUE
+ .word !mtext_chip_cc_time_limit
+ .byt  ^mtext_chip_cc_time_limit
+ .word !kv_cc_time_limit
+ .byt  ^kv_cc_time_limit
+ .byt  OPTTYPE_KVBYTE
+ .word !CFG_CC_TIME_LIMIT
+ .byt  ^CFG_CC_TIME_LIMIT
+ .word !mdesc_chip_cc_time_limit
+ .byt  ^mdesc_chip_cc_time_limit
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0
@@ -555,8 +660,8 @@ menu_enttab_ingame:
  .byt  MTYPE_VALUE
  .word !mtext_ingame_shortreset
  .byt  ^mtext_ingame_shortreset
- .word !kv_onoff
- .byt  ^kv_onoff
+ .word !kv_rst_to_menu
+ .byt  ^kv_rst_to_menu
  .byt  OPTTYPE_KVBYTE
  .word !CFG_ENABLE_RST_TO_MENU
  .byt  ^CFG_ENABLE_RST_TO_MENU
@@ -793,6 +898,19 @@ menu_enttab_filesel_context_file:
  .byt  0,0,0
 
  .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_cheats
+ .byt  ^text_filesel_context_cheats
+ .word !cheat_menu_for_selected_file-1
+ .byt  ^cheat_menu_for_selected_file-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_cheats
+ .byt  ^mdesc_filesel_context_cheats
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_FUNC_CLOSE
  .word !text_filesel_set_as_autoboot
  .byt  ^text_filesel_set_as_autoboot
  .word !set_selected_as_autoboot_rom-1
@@ -801,6 +919,32 @@ menu_enttab_filesel_context_file:
  .byt  0,0,0
  .word !mdesc_filesel_set_as_autoboot
  .byt  ^mdesc_filesel_set_as_autoboot
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+ 
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_delete_file
+ .byt  ^text_filesel_context_delete_file
+ .word !delete_selected_file-1
+ .byt  ^delete_selected_file-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_delete_file
+ .byt  ^mdesc_filesel_context_delete_file
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_delete_srm
+ .byt  ^text_filesel_context_delete_srm
+ .word !delete_selected_srm-1
+ .byt  ^delete_selected_srm-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_delete_srm
+ .byt  ^mdesc_filesel_context_delete_srm
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0
@@ -851,6 +995,114 @@ menu_enttab_recent_context:
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0
+ 
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_cheats
+ .byt  ^text_filesel_context_cheats
+ .word !cheat_menu_for_recent_file-1
+ .byt  ^cheat_menu_for_recent_file-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_cheats
+ .byt  ^mdesc_filesel_context_cheats
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+ 
+ .byt  0
+
+menu_enttab_filesel_context_spc:
+; HEADER
+ .byt  1              ; listsel_step=1
+ .word !text_filesel_selected_file ; window title
+ .byt  ^text_filesel_selected_file ; for this menu
+; ENTRIES
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_set_as_bgm
+ .byt  ^text_filesel_set_as_bgm
+ .word !set_selected_spc_as_bgm-1
+ .byt  ^set_selected_spc_as_bgm-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_set_as_bgm
+ .byt  ^mdesc_filesel_set_as_bgm
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_delete_file
+ .byt  ^text_filesel_context_delete_file
+ .word !delete_selected_file-1
+ .byt  ^delete_selected_file-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_delete_file
+ .byt  ^mdesc_filesel_context_delete_file
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0
+
+menu_enttab_filesel_context_st_file:
+; HEADER
+ .byt  1              ; listsel_step=1
+ .word !text_filesel_selected_file ; window title
+ .byt  ^text_filesel_selected_file ; for this menu
+; ENTRIES
+
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_add_to_favorites
+ .byt  ^text_filesel_context_add_to_favorites
+ .word !add_selected_file_to_favorites-1
+ .byt  ^add_selected_file_to_favorites-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_add_to_favorites
+ .byt  ^mdesc_filesel_context_add_to_favorites
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_set_as_autoboot
+ .byt  ^text_filesel_set_as_autoboot
+ .word !set_selected_as_autoboot_rom-1
+ .byt  ^set_selected_as_autoboot_rom-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_set_as_autoboot
+ .byt  ^mdesc_filesel_set_as_autoboot
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_set_as_slotb
+ .byt  ^text_filesel_context_set_as_slotb
+ .word !set_selected_as_slotb_rom-1
+ .byt  ^set_selected_as_slotb_rom-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_set_as_slotb
+ .byt  ^mdesc_filesel_context_set_as_slotb
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+ 
+  .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_delete_file
+ .byt  ^text_filesel_context_delete_file
+ .word !delete_selected_file-1
+ .byt  ^delete_selected_file-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_delete_file
+ .byt  ^mdesc_filesel_context_delete_file
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
 
  .byt  0
 
@@ -869,6 +1121,19 @@ menu_enttab_filesel_favorites_context:
  .byt  0,0,0
  .word !mdesc_filesel_context_remove_from_favorites
  .byt  ^mdesc_filesel_context_remove_from_favorites
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_cheats
+ .byt  ^text_filesel_context_cheats
+ .word !cheat_menu_for_favorite_file-1
+ .byt  ^cheat_menu_for_favorite_file-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_cheats
+ .byt  ^mdesc_filesel_context_cheats
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0
@@ -964,6 +1229,13 @@ kv_onoff:
 .word $0001, !text_on : .byt ^text_on
 .word $ffff
 
+kv_rst_to_menu:
+.word $0000, !text_off : .byt ^text_off
+.word $0001, !text_on : .byt ^text_on
+.word $0002, !text_nav_folder : .byt ^text_nav_folder
+.word $0003, !text_nav_rom : .byt ^text_nav_rom
+.word $ffff
+
 kv_enabledisable:
 .word $0000, !text_enabled : .byt ^text_enabled
 .word $0001, !text_disabled : .byt ^text_disabled
@@ -994,6 +1266,25 @@ kv_cx4_speed:
 kv_gsu_speed:
 .word $0000, !text_normal : .byt ^text_normal
 .word $0001, !text_fast : .byt ^text_fast
+.word $ffff
+
+kv_cc_time_limit:
+.word $0000, !text_3min : .byt ^text_3min
+.word $0001, !text_4min : .byt ^text_4min
+.word $0002, !text_5min : .byt ^text_5min
+.word $0003, !text_6min : .byt ^text_6min
+.word $0004, !text_7min : .byt ^text_7min
+.word $0005, !text_8min : .byt ^text_8min
+.word $0006, !text_9min : .byt ^text_9min
+.word $0007, !text_10min : .byt ^text_10min
+.word $0008, !text_11min : .byt ^text_11min
+.word $0009, !text_12min : .byt ^text_12min
+.word $000a, !text_13min : .byt ^text_13min
+.word $000b, !text_14min : .byt ^text_14min
+.word $000c, !text_15min : .byt ^text_15min
+.word $000d, !text_16min : .byt ^text_16min
+.word $000e, !text_17min : .byt ^text_17min
+.word $000f, !text_18min : .byt ^text_18min
 .word $ffff
 
 kv_sgb_clock:

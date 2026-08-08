@@ -21,6 +21,7 @@ module address(
   input CLK,
   input [15:0] featurebits, // peripheral enable/disable
   input [2:0] MAPPER,       // MCU detected mapper
+  input IS_FX3,             // FX3 (Reality Engine 2) coprocessor variant
   input [23:0] SNES_ADDR,   // requested address from SNES
   input [7:0] SNES_PA,      // peripheral address from SNES
   input SNES_ROMSEL,        // ROMSEL from SNES
@@ -58,13 +59,28 @@ assign IS_ROM = ~SNES_ROMSEL;
 
 assign IS_SAVERAM = SAVERAM_MASK[0]
                     & ( // 60-7D/E0-FF:0000-FFFF
+                        // FX3 repurposes almost all of this range as new ROM
+                        // banks (the extra 2MB/3MB) - per Randal Linden's own
+                        // MesenCE reference implementation, ONLY $70-$71 remain
+                        // GSU-RAM/saveram for FX3 (matching the RAMBR-based
+                        // direct RAM access path in gsu.v); the $F0-$F1
+                        // exclusion is stock-GSU-only and must NOT apply when
+                        // IS_FX3 is set, or reads from $F0/$F1 (which are
+                        // ordinary ROM banks on FX3, part of the $C0-$FF
+                        // full-4MB range) get silently misrouted to the SRAM
+                        // chip instead of actual ROM data.
                         ( &SNES_ADDR[22:21]
                         & ~SNES_ROMSEL
+                        & (~IS_FX3 | (~SNES_ADDR[23] & SNES_ADDR[20] & (SNES_ADDR[19:17] == 3'b000)))
                         )
                         // 00-3F/80-BF:6000-7FFF
+                        // FX3 carves its register window ($7000-$72FF) out of
+                        // this range, so exclude it here or gsu_enable and
+                        // IS_SAVERAM would both assert for the same address.
                       | ( ~SNES_ADDR[22]
                         & ~SNES_ADDR[15]
                         & &SNES_ADDR[14:13]
+                        & ~(IS_FX3 & ({SNES_ADDR[15:10],2'h0} == 8'h70) & (SNES_ADDR[9:8] != 2'h3))
                         )
                       );
 
@@ -93,6 +109,11 @@ assign branch1_enable = (SNES_ADDR == 24'h002A1F);
 assign branch2_enable = (SNES_ADDR == 24'h002A59);
 assign branch3_enable = (SNES_ADDR == 24'h002A5E);
 // 00-3F/80-BF:3000-32FF gsu registers.  TODO: some emulators go to $34FF???
-assign gsu_enable = (!SNES_ADDR[22] && ({SNES_ADDR[15:10],2'h0} == 8'h30)) && (SNES_ADDR[9:8] != 2'h3);
+// FX3 (Reality Engine 2) moves this window to 00-3F/80-BF:7000-72FF instead,
+// to make room for the extended PRG ROM bank range (see ROM_MASK/bank logic).
+assign gsu_enable = (!SNES_ADDR[22]
+                    && (IS_FX3 ? (SNES_ADDR[15:12] == 4'h7)
+                                : ({SNES_ADDR[15:10],2'h0} == 8'h30)))
+                    && (SNES_ADDR[9:8] != 2'h3);
 
 endmodule

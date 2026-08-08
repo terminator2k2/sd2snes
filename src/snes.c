@@ -45,6 +45,7 @@
 #include "sgb.h"
 #include "version.h"
 #include "hwinfo.h"
+#include "msu1.h"   /* menu_sfx_* : menu sound effects via the MSU-1 DAC */
 
 uint32_t saveram_crc, saveram_crc_old;
 uint8_t sram_crc_valid;
@@ -114,6 +115,11 @@ void prepare_reset() {
     save_srm(file_lfn, romprops.ramsize_bytes, SRAM_SAVE_ADDR);
     writeled(0);
   }
+  if(slotb_ramsize_bytes && fpga_test() == FPGA_TEST_TOKEN) {
+    writeled(1);
+    save_srm((uint8_t*)slotb_filename, slotb_ramsize_bytes, 0xE80000);
+    writeled(0);
+  }
   // don't save SGB RTC since we are in reset and it may be undefined
   rdyled(1);
   readled(1);
@@ -123,6 +129,8 @@ void prepare_reset() {
   snes_reset(1);
   fpga_dspx_reset(1);
   delay_ms(200);
+  slotb_filename[0] = 0;     /* clear Slot B selection on every return-to-menu */
+  slotb_ramsize_bytes = 0;
 }
 
 void snes_init() {
@@ -313,6 +321,7 @@ uint8_t snes_main_loop() {
           printf("SaveRAM CRC: 0x%04lx; saving %s\n", saveram_crc, file_lfn);
           writeled(1);
           save_srm(file_lfn, romprops.ramsize_bytes, SRAM_SAVE_ADDR);
+          if(slotb_ramsize_bytes) save_srm((uint8_t*)slotb_filename, slotb_ramsize_bytes, 0xE80000);
           last_save_failed = save_failed;
           save_failed = file_res ? 1 : 0;
           didnotsave = save_failed ? 25 : 0;
@@ -323,6 +332,7 @@ uint8_t snes_main_loop() {
           diffcount=0;
           writeled(1);
           save_srm(file_lfn, romprops.ramsize_bytes, SRAM_SAVE_ADDR);
+          if(slotb_ramsize_bytes) save_srm((uint8_t*)slotb_filename, slotb_ramsize_bytes, 0xE80000);
           last_save_failed = save_failed;
           save_failed = file_res ? 1 : 0;
           didnotsave = save_failed ? 25 : 0;
@@ -359,11 +369,45 @@ uint8_t menu_main_loop() {
     if(!get_snes_reset()) {
       while(!sram_reliable())printf("hurr\n");
       cmd = snes_get_mcu_cmd();
+      {
+        /* navigation sound effects live in their OWN mailbox byte, fully
+           outside the MCU_CMD/SNES_CMD handshake (sharing it raced the real
+           commands - a readdir clobbered blips, and a blip-consume once erased
+           a racing SYSINFO command). Value = effect+1; anything else (e.g.
+           power-on garbage) is consumed and ignored. Missing .pcm files just
+           stay silent (menu_sfx_play). */
+        static const char *menu_sfx_files[4] = {
+          "/sd2snes/sfx_cursor.pcm", "/sd2snes/sfx_confirm.pcm",
+          "/sd2snes/sfx_back.pcm",   "/sd2snes/sfx_error.pcm"
+        };
+        uint8_t fx;
+        fpga_set_snescmd_addr(SNESCMD_SFX_MAILBOX);
+        fx = fpga_read_snescmd();
+        if(fx) {
+          snescmd_writebyte(0, SNESCMD_SFX_MAILBOX);
+          /* "Menu sounds" toggle (CFG_ENABLE_MENU_SFX): gate HERE so flipping
+             the option takes effect instantly, no reload needed. */
+          if(fx <= 4 && CFG.enable_menu_sfx) menu_sfx_play(menu_sfx_files[fx - 1]);
+        }
+      }
     }
     if(get_snes_reset()) {
+      /* console reset sensed: the SNES will re-run the menu in place - full SFX
+         teardown NOW so the feature set is back to the menu's own before its
+         re-init (reset-safety; see menu_sfx_shutdown in msu1.c). */
+      menu_sfx_shutdown();
       cmd = 0;
     }
-    sleep_ms(20);
+    /* While an effect is playing the FPGA drains a DAC half-buffer every ~6 ms
+       (44.1 kHz) - far faster than this 20 ms poll - so busy-service the DAC to
+       the same ~20 ms budget instead of sleeping (verbatim pattern from the
+       proven msu1-menu branch). No-op when idle: plain 20 ms sleep as before. */
+    if(menu_sfx_active()) {
+      tick_t until = getticks() + MS_TO_TICKS(20);
+      do { menu_sfx_pump(); } while(getticks() < until);
+    } else {
+      sleep_ms(20);
+    }
     cli_entrycheck();
     if (!cmd) {
       cmd = usbint_handler();

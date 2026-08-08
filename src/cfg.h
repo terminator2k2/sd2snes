@@ -9,6 +9,15 @@
 #define FAVORITES_FILE     ((const uint8_t*)"/sd2snes/favorites.cfg")
 #define AUTOBOOT_FILE      ((const uint8_t*)"/sd2snes/autoboot.cfg")
 
+/* Per-list caps for the recent/favorite game lists (listed_game_cap() in cfg.c
+   picks one by filename).  MAX_LISTED_GAMES = max of the two: it sizes the shared
+   on-stack scratch buffers (fntmp[][256], write_indices[]) in cfg.c, and the SNES
+   SRAM mirror regions (LAST_GAME / FAVORITE_GAMES) must hold this many 256-byte
+   entries -- keep memmap.i65 in lockstep when raising it. */
+#define MAX_RECENT_GAMES    10
+#define MAX_FAVORITE_GAMES  20
+#define MAX_LISTED_GAMES    20
+
 #define CFG_VIDMODE_MENU                 ("VideoModeMenu")
 #define CFG_VIDMODE_GAME                 ("VideoModeGame")
 #define CFG_PAIR_MODE_ALLOWED            ("PairModeAllowed")
@@ -49,6 +58,14 @@
 #define CFG_SGB_BIOS_VERSION             ("SGBBiosVersion")
 #define CFG_ENABLE_AUTOSAVE              ("EnableAutoSave")
 #define CFG_ENABLE_AUTOSAVE_MSU1         ("EnableMSU1AutoSave")
+#define CFG_ENABLE_MENU_MUSIC            ("EnableMenuMusic")
+#define CFG_PATCH_VERIFY_INTEGRITY       ("PatchVerifyIntegrity")
+#define CFG_ENABLE_MENU_SFX              ("EnableMenuSFX")
+#define CFG_MENU_MUSIC_FILE              ("MenuMusicFile")
+#define CFG_SORT_FAVORITES               ("SortFavorites")
+#define CFG_CC_TIME_LIMIT                ("CCTimeLimit")
+
+
 
 typedef enum {
   VIDMODE_60 = 0,
@@ -77,7 +94,7 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
   uint8_t  onechip_transient_fixes; /* override register 2100 bits 3-0 */
   uint8_t  brightness_limit;        /* limit brightness set by register 2100 */
   uint8_t  gsu_speed;               /* GSU speed (0: original, 1: no waitstates */
-  uint8_t  reset_to_menu;           /* Go back to menu on short reset */
+  uint8_t  reset_to_menu;           /* Go back to menu on short reset (0=off, 1=on, 2=folder, 3=rom) */
   uint8_t  led_brightness;          /* LED brightness (0..15) */
   uint8_t  enable_cheats;           /* initial cheat enable state */
   uint8_t  reset_patch;             /* enable reset patch */
@@ -94,8 +111,18 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
   uint8_t  sgb_spr_increase;        /* SGB increase number of supported visible sprites */
   uint8_t  sgb_clock_fix;           /* SGB timing/clock (true: original/sgb2, false: snes/sgb1) */
   uint8_t  sgb_bios_version;        /* SGB bios firmware version (defined number loads: sgbX_boot.bin and sgbX_snes.bin) */
+  uint8_t  show_tribute;            /* reserved: keeps cfg_t aligned with the menu's CFG offset map (CFG_SHOW_TRIBUTE @ $B3) */
   uint8_t  enable_autosave;         /* enable automatic saving when SRAM contents change */
   uint8_t  enable_autosave_msu1;    /* enable opportunistic auto saving when SRAM contents change for MSU1 games */
+  uint8_t  _pad_b6;
+  uint8_t  _pad_b7;
+  uint8_t  patch_verify_integrity;  /* CFG @ $B8: re-read+CRC the patched ROM after IPS/BPS (slow) */
+  uint8_t  enable_menu_music;       /* play background menu music (/sd2snes/menu.spc) */
+  uint8_t  _pad_ba;
+  uint8_t  enable_menu_sfx;         /* CFG @ $BB: menu navigation sound effects (MSU-1 DAC, /sd2snes/sfx_*.pcm) */
+  uint8_t  bgm_name[128];           /* CFG @ $BC: full SD path of the chosen background-music .spc ("" = use /sd2snes/menu.spc fallback) */
+  uint8_t  sort_favorites;          /* CFG @ $13C: show the Favorites list alphabetically (display-only; the .cfg keeps recency order) */
+  uint8_t  cc_time_limit;           /* Competition Cart time limit (0: 3min, 1: 5min, 2: 10min) */
 } cfg_t;
 
 int cfg_save(void);
@@ -103,9 +130,17 @@ int cfg_load(void);
 
 int cfg_validity_check_listed_games(const uint8_t *listfilename);
 int cfg_add_listed_game(const uint8_t *listfilename, uint8_t *fn, bool evict_oldest);
+int cfg_add_listed_game_patched(const uint8_t *listfilename, uint8_t *fn, const char *patch_basename, bool evict_oldest);
 int cfg_remove_listed_game(const uint8_t *listfilename, uint8_t index_to_remove);
+/* Map an on-screen list index back to the favorites.cfg file index.  Favorites are
+   sorted at display time only (the file keeps insertion order, so the toggle is
+   reversible); cfg_dump_listed_games_for_snes records the permutation so by-index
+   ops resolve the entry the user sees.  Identity for recents / when sort is off. */
+uint8_t listed_game_resolve_index(const uint8_t *listfile, uint8_t menu_idx);
 int cfg_get_listed_game(const uint8_t *listfilename, uint8_t *fn, uint8_t index);
-uint8_t cfg_dump_listed_games_for_snes(const uint8_t *listfilename, uint32_t address);
+int cfg_get_listed_game_raw(const uint8_t *listfilename, uint8_t *fn, uint8_t index);
+int cfg_parse_patch_entry(char *entry, char *patchpath, int size);
+uint8_t cfg_dump_listed_games_for_snes(const uint8_t *listfilename, uint32_t address, uint8_t write_lastdir);
 
 uint8_t cfg_is_autoboot_enabled(void);
 int cfg_get_autoboot_rom(uint8_t *fn);

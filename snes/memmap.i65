@@ -16,6 +16,14 @@
 #define WARM_SIGNATURE              $002AFD
 #define WARM_COMPLEMENT             $002AF9
 #define SAVED_SP                    $002AFB
+#define BGM_STATE                   $002AF7 /* fork: menu-music runtime state. Lives in the $2A
+                                              FPGA region, which is NOT cleared by clear_wram and
+                                              survives a reset, so coldboot explicitly zeroes it
+                                              (main.a65) -- every non-warm reset lands in coldboot.
+                                              0=not loaded (reload), 1=playing, 2=tried-no-spc,
+                                              3=music off + DSP-unmute stub running (keeps the
+                                              cart MSU-1 DAC audible for the menu sound effects),
+                                              4=tried-no-spc + DSP-unmute stub running. */
 
 #define BRAM_PAYLOAD                $002A10
 #define BRAM_RETURN_VECTOR          $002A6C
@@ -44,8 +52,11 @@
 
 #define ROOT_DIR                    $C10000
 
-#define NUM_CHEATS                  $CFFFFE
+#define NUM_CHEATS                  $FF0700
 #define CHEAT_ADDR                  $D00000
+#define CHEAT_CODE_STRINGS          $D40000 /* per-code display strings, 12 bytes each. cheat_idx*512 + code_idx*12. Spans banks D4..D7 to leave D0..D3 free for up to 512 cheat records (512 bytes each). */
+#define CHEAT_TITLE                 $D80000 /* 256 bytes "Cheats for <game>" null-terminated, in cheat region past any plausible cheat count */
+#define CHEAT_FLAGS                 $FF0500 /* 512 bytes BSRAM mirror of cheat flag byte 0 (cheats 0..511). SNES reads/writes here for instant visual toggle, MCU also keeps it in sync. */
 
 #define SPC_DATA                    $FD0000
 #define SPC_HEADER                  $FE0000
@@ -57,8 +68,10 @@
 #define ST_SNES_ADDR                $FF1110
 #define SYSINFO_BLK                 $FF1200
 #define LAST_GAME                   $FF1420
+#define LAST_GAME_DIR               $FF1F00
 #define WRAM_BAK                    $FF2000
-#define FAVORITE_GAMES              $FF4000
+#define FAVORITE_GAMES              $FF6000 /* 20*256 = $1400 -> $FF6000..$FF73FF. Moved off $FF4000 (only fit 10) into the free gap past IPS_LIST so favorites could grow to 20. Lockstep with SRAM_FAVORITEGAMES_ADDR (src/memory.h). Old $FF4000..$FF49FF now unused. */
+#define LAST_GAME_FILE              $FF4A00 /* base ROM basename for reset_to_menu==3 pre-select (now-fully-free gap before IPS_LIST $FF5000; favorites moved off $FF4000 to $FF6000). NOT LAST_GAME[0]: that is the recents display name, which for a patch-aware entry is the patch name and never matches a TYPE_ROM directory entry. */
 
 #define CMD_LOADROM                 $01 /* shortcut - load ROM with default settings */
 #define CMD_SETRTC                  $02
@@ -87,6 +100,29 @@
 #define CMD_SET_AUTOBOOT_RECENT     $19
 #define CMD_CLR_AUTOBOOT_ROM        $1a /* clear autoboot ROM setting */
 #define CMD_LOAD_AUTOBOOT           $1b /* trigger autoboot at cold boot */
+#define CMD_DELETE_SRM              $1C /* delete SRM save file for selected ROM */
+#define CMD_TOGGLE_CHT              $1D /* MCU_PARAM low byte: cheat index. MCU XORs the flag bit in PSRAM record. */
+#define CMD_LOAD_CHT_FAV            $1E /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_load. */
+#define CMD_SAVE_CHT_FAV            $20 /* MCU_PARAM low byte: favorite index. Resolves path via cfg_get_favorite_game then cheat_yaml_save. */
+#define CMD_SET_SLOTB_ROM           $21 /* set Slot B companion cart for Sufami Turbo (non-persistent) */
+#define CMD_QUERY_IPS_PATCHES       $22 /* find IPS patches for selected ROM */
+#define CMD_DELETE_FILE             $23 /* delete selected file */
+#define CMD_LOAD_MENU_SPC           $24 /* stage /sd2snes/menu.spc for background menu music */
+#define CMD_DELETE_FILE_FAV         $25 /* MCU_PARAM low byte: favorite index. Delete the ROM, then drop the favorites list entry. */
+#define CMD_DELETE_SRM_FAV          $26 /* MCU_PARAM low byte: favorite index. Delete only the .srm (ROM stays in favorites). */
+#define CMD_DELETE_FILE_RECENT      $27 /* MCU_PARAM low byte: recent index. Delete the ROM, then drop the recents list entry. */
+#define CMD_DELETE_SRM_RECENT       $28 /* MCU_PARAM low byte: recent index. Delete only the .srm (ROM stays in recents). */
+#define CMD_LOAD_CHT_RECENT         $29 /* MCU_PARAM low byte: recent index. Resolves path via LAST_FILE then cheat_yaml_load. */
+#define CMD_SAVE_CHT_RECENT         $2A /* MCU_PARAM low byte: recent index. Resolves path via LAST_FILE then cheat_yaml_save. */
+#define CMD_SET_MENU_SPC            $2B /* selected .spc (MCU_PARAM set like LOADROM): store full path in CFG.bgm_name, enable music */
+#define CMD_CLR_MENU_SPC            $2C /* clear CFG.bgm_name -> menu BGM falls back to /sd2snes/menu.spc */
+#define SFX_MAILBOX                 $002BE0 /* fork: menu sound effects mailbox (sfx.a65 <-> MCU menu loop). Value = effect+1 (1-4: cursor/confirm/back/error), 0 = consumed. DEDICATED byte: sharing MCU_CMD raced the real commands. NOT $2A08: MCU_PARAM is a 12-BYTE region ($2A04-$2A0F, settime writes +11) - parking there corrupted cover requests and saved garbled favorites. $2BE0 sits in the unreferenced $2BB4-$2BEF gap. Newest-wins, fire-and-forget. */
+
+
+#define IPS_LIST                    $FF5000  /* IPS patch list written by MCU */
+#define IPS_NAME_LEN                64       /* bytes per display name entry */
+#define IPS_MAX_PATCHES             8        /* maximum patches per ROM */
+
 #define CMD_SAVESTATE               $40
 #define CMD_LOADSTATE               $41
 #define CMD_MCU_RDY                 $55
@@ -141,14 +177,23 @@
 #define CFG_SHOW_TRIBUTE                CFG_ADDR+$00B3
 #define CFG_ENABLE_AUTOSAVE             CFG_ADDR+$00B4
 #define CFG_ENABLE_AUTOSAVE_MSU1        CFG_ADDR+$00B5
+#define CFG_PATCH_VERIFY_INTEGRITY      CFG_ADDR+$00B8
+#define CFG_ENABLE_MENU_MUSIC           CFG_ADDR+$00B9
+#define CFG_ENABLE_MENU_SFX             CFG_ADDR+$00BB
+#define CFG_MENU_MUSIC_FILE             CFG_ADDR+$00BC
+#define CFG_SORT_FAVORITES              CFG_ADDR+$013C
+#define CFG_CC_TIME_LIMIT               CFG_ADDR+$013D
 
 #define MENU_ENTRY_SIZE             23
+#define FAV_VISMAX                  13 /* max favorites rows shown at once (window at last_win_y=12 -> rows 12..26, status bar 27); the rest scroll */
 
 #define ST_RTC_VALID                ST_MCU_ADDR+$0000
 #define ST_NUM_RECENT_GAMES         ST_MCU_ADDR+$0001
 #define ST_PAIRMODE                 ST_MCU_ADDR+$0002
 #define ST_NUM_FAVORITE_GAMES       ST_MCU_ADDR+$0003
 #define ST_AUTOBOOT_ENABLED         ST_MCU_ADDR+$0004
+#define ST_RESET_TO_MENU_ACTIVE     ST_MCU_ADDR+$0005
+#define ST_FAVORITES_FULL           ST_MCU_ADDR+$0006 /* 1 if the last add-favorite was refused (list full) */
 
 #define ST_IS_U16                   ST_SNES_ADDR+$0000
 #define ST_U16_CFG                  ST_SNES_ADDR+$0001
@@ -177,6 +222,7 @@
 #define TYPE_ROM                    $01
 #define TYPE_SRM                    $02
 #define TYPE_SPC                    $03
+#define TYPE_ROM_ST                 $07
 #define TYPE_IPS                    $04
 #define TYPE_CHT                    $05
 #define TYPE_SKIN                   $06
