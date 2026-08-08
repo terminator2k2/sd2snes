@@ -211,6 +211,12 @@ mtext_browser_hide_ext            .byt "Hide file extensions", 0
 mtext_browser_screensaver         .byt "Screensaver", 0
 mtext_browser_screensaver_timeout .byt "Fade screen after", 0
 mtext_browser_ledbright           .byt "LED brightness", 0
+mtext_cfg_patch                   .byt "Patch Options", 0
+mtext_patch_verify                .byt "Verify Integrity (~23s)", 0
+mtext_browser_menumusic           .byt "Menu music", 0
+mtext_browser_menusfx             .byt "Menu sounds", 0
+mtext_browser_sortfav             .byt "Sort favorites", 0
+mtext_browser_restoremusic        .byt "Restore music", 0
 mtext_ingame_cheats               .byt "Start with cheats enabled", 0
 mtext_ingame_shortreset           .byt "Reset to menu", 0
 mtext_ingame_enable               .byt "In-game hook", 0
@@ -235,9 +241,10 @@ mtext_ingame_autosave_msu1        .byt " ",129,"MSU-1 Autosave", 0
 mtext_chip_cx4_speed              .byt "Cx4 speed", 0
 mtext_chip_gsu_speed              .byt "SuperFX speed", 0
 mtext_chip_msu1_volume_boost      .byt "MSU-1 volume boost", 0
+mtext_chip_cc_time_limit          .byt "Comp. Cart Time", 0
 
 mdesc_mm_last                     .byt "Show up to 10 most recently played games", 0
-mdesc_mm_favorites                .byt "Show up to 10 favorite games", 0
+mdesc_mm_favorites                .byt "Show up to 20 favorite games", 0
 mdesc_mm_cfg                      .byt "Configure the sd2snes", 0
 mdesc_mm_sysinfo                  .byt "Info about FW version, SD Card, SNES, CIC", 127, 128, 0
 mdesc_cfg_time                    .byt "Set the date and time", 0
@@ -258,8 +265,14 @@ mdesc_browser_hide_ext            .byt "Choose whether to hide file extensions",
 mdesc_browser_screensaver         .byt "Fade-out the screen after some time", 0
 mdesc_browser_screensaver_timeout .byt "Set time after which to fade the screen", 0
 mdesc_browser_ledbright           .byt "Change brightness of LEDs", 0
+mdesc_cfg_patch                   .byt "Options for IPS/BPS soft-patching", 0
+mdesc_patch_verify                .byt "Re-read the patched ROM to verify it (much slower load)", 0
+mdesc_browser_menumusic           .byt "Play background music (menu.spc) in the menu", 0
+mdesc_browser_menusfx             .byt "Play sound effects when navigating the menu", 0
+mdesc_browser_sortfav             .byt "Sort the favorites list alphabetically", 0
+mdesc_browser_restoremusic        .byt "Revert the menu background music to the default (menu.spc)", 0
 mdesc_ingame_cheats               .byt "Whether to start out with cheats enabled. Can be changed using in-game buttons", 0
-mdesc_ingame_shortreset           .byt "Go back to menu on short reset if enabled", 0
+mdesc_ingame_shortreset           .byt "Go back to menu on short reset (Off/On/Folder/ROM). Folder: return to last game folder. ROM: also pre-select the ROM.", 0
 mdesc_ingame_enable               .byt "Required for in-game buttons and 7E/7F cheats", 0
 mdesc_ingame_buttons              .byt "Enable in-game buttons (reset, en/disable cheats", 127, 128, "). Requires in-game hook to be enabled.", 0
 mdesc_ingame_holdoff              .byt "Wait 10 seconds before enabling hook (helps some games boot with hook enabled)", 0
@@ -286,6 +299,7 @@ mdesc_cx4_speed_fast              .byt "Run as fast as possible", 0
 mdesc_cx4_speed_normal            .byt "Run at approx. original speed", 0
 mdesc_gsu_speed_fast              .byt "Run as fast as possible", 0
 mdesc_gsu_speed_normal            .byt "Run at approx. original speed", 0
+mdesc_chip_cc_time_limit          .byt "Competition Cart time limit", 0
 
 text_filesel_selected_file .byt "Selected file", 0
 text_filesel_context_add_to_favorites .byt "Add to favorites", 0
@@ -294,11 +308,41 @@ mdesc_filesel_context_add_to_favorites .byt "Add the selected file to favorites"
 text_filesel_context_remove_from_favorites .byt "Remove from favorites", 0
 mdesc_filesel_context_remove_from_favorites .byt "Remove the selected file from favorites", 0
 
+text_filesel_context_set_as_slotb .byt "Set as Slot B", 0
+mdesc_filesel_context_set_as_slotb .byt "Load this .ST ROM as the Sufami Turbo Slot B companion cart", 0
+
 text_recent_context_remove_from_recent .byt "Remove from recent games", 0
 mdesc_recent_context_remove_from_recent .byt "Remove selected file from the recent games list", 0
 
 text_filesel_set_as_autoboot .byt "Set as autoboot", 0
 mdesc_filesel_set_as_autoboot .byt "Boot this ROM automatically on next power-on (hold START during powerup/reset to cancel)", 0
+
+text_filesel_set_as_bgm .byt "Set as menu music", 0
+mdesc_filesel_set_as_bgm .byt "Use this SPC as the menu background music", 0
+
+text_filesel_context_delete_file .byt "Delete", 0
+mdesc_filesel_context_delete_file .byt "Delete the selected file", 0
+
+text_filesel_context_delete_srm .byt "Delete save file", 0
+mdesc_filesel_context_delete_srm .byt "Delete the SRM save file for this ROM", 0
+
+text_filesel_context_cheats .byt "Cheats", 0
+mdesc_filesel_context_cheats .byt "View, enable or disable cheats from this ROM's YAML file", 0
+
+text_cheat_yes  .byt "Yes ", 0
+text_cheat_no   .byt "No  ", 0
+text_cheat_none_title .byt "Cheats", 0
+text_cheat_none_msg   .byt "No cheats found for this ROM", 0
+
+; delete-confirmation dialog (see confirm_delete in filesel.a65)
+text_confirm_delete_file .byt "Delete this file?", 0
+text_confirm_delete_srm  .byt "Delete the save file?", 0
+text_confirm_hint        .byt "A:Confirm  B:Cancel", 0
+text_confirm_no_sel      .byt " [No] ", 0
+text_confirm_no_unsel    .byt "  No  ", 0
+text_confirm_yes_sel     .byt " [Yes]", 0
+text_confirm_yes_unsel   .byt "  Yes ", 0
+
 
 text_statusbar_play .byt "A:Play B:Back X:Menu", 0
 text_statusbar_keys .byt "A:Select B:Back X:Menu Y:Context", 0
@@ -306,12 +350,17 @@ text_statusbar_spc  .byt "B:Back", 0
 text_statusbar_menu .byt "A:Select B:Back", 0
 text_last           .byt "Recent games", 0
 text_favorite       .byt "Favorite games", 0
+text_no_last        .byt "No recent games", 0
+text_no_favorite    .byt "No favorite games", 0
+text_favorites_full .byt "Favorites list full", 0
 text_system         .byt "CPU/PPU1/PPU2: a/b/c        VMode: x0Hz",0
 
 text_on_p1      .byt "On: P1", 0
 text_on_p2      .byt "On: P2", 0
 text_on         .byt "On", 0
 text_off        .byt "Off", 0
+text_nav_folder .byt "Folder", 0
+text_nav_rom    .byt "ROM", 0
 text_enabled    .byt "Enabled", 0
 text_disabled   .byt "Disabled", 0
 text_normal     .byt "Normal", 0
@@ -335,8 +384,19 @@ text_2min       .byt "2 mins", 0
 text_3min       .byt "3 mins", 0
 text_4min       .byt "4 mins", 0
 text_5min       .byt "5 mins", 0
+text_6min       .byt "6 mins", 0
+text_7min       .byt "7 mins", 0
+text_8min       .byt "8 mins", 0
+text_9min       .byt "9 mins", 0
 text_10min      .byt "10 mins", 0
+text_11min      .byt "11 mins", 0
+text_12min      .byt "12 mins", 0
+text_13min      .byt "13 mins", 0
+text_14min      .byt "14 mins", 0
 text_15min      .byt "15 mins", 0
+text_16min      .byt "16 mins", 0
+text_17min      .byt "17 mins", 0
+text_18min      .byt "18 mins", 0
 text_20min      .byt "20 mins", 0
 text_30min      .byt "30 mins", 0
 text_45min      .byt "45 mins", 0
@@ -400,20 +460,22 @@ loading_win_w   .byt 34
 loading_win_h   .byt 1
 
 text_cheat      .byt "Cheats for ", 0
+text_ips_header .byt "Patches", 0
+text_ips_nopatch .byt "[No patch]", 0
 cheat_win_x     .byt 6
 cheat_win_y     .byt 11
 cheat_win_w     .byt 52
-cheat_win_h     .byt 15
+cheat_win_h     .byt 16
 
-cheat_tab_head  .byt "Name                         # of codes  Enabled", 0
-cheat_tab_line  .byt 24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24
-                .byt 24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24
-                .byt 24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,0
-
-cheat_detail_head .byt "PAR       GG        Address Value", 0
-cheat_detail_line .byt 24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24
-                  .byt 24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24
-                  .byt 24,0
+cheat_tab_head  .byt "Description                              Enabled", 0
+; Hint line drawn over the bottom border row.
+; Tile $19 (decimal 25) = window_sh (south horizontal bar), drawn in
+; palette 3 so it reads as one continuous frame with the corner tiles.
+; The text in the middle stays in palette 0 (white). cheat_tab_hint_bars
+; is sized for the longer (left) side; the draw routine prints just 7
+; of these for the right side.
+cheat_tab_hint_bars .byt 25,25,25,25,25,25,25,25,0
+cheat_tab_hint_text .byt " A:Enable/Disable   B:Save & Exit ", 0
 
 text_spcid      .byt "SNES-SPC700"
 rootdir         .byt "/", 0

@@ -151,6 +151,13 @@ wire [10:0] SD_DMA_DBG_cyclecnt;
 
 wire [15:0] dsp_feat;
 
+// dsp_feat[0] = existing GSU speed toggle (CFG.gsu_speed), dsp_feat[1] = FX3 mode.
+// Only meaningful while the GSU coprocessor slot is actually loaded/active.
+// (Declared here, ahead of first use, rather than near where dsp_feat_out
+// is wired up further down - Verilog/XST requires the declaration to
+// precede any procedural or structural use within the module.)
+wire IS_FX3 = dsp_feat[1];
+
 wire [8:0] snescmd_addr_mcu;
 wire [7:0] snescmd_data_out_mcu;
 wire [7:0] snescmd_data_in_mcu;
@@ -194,6 +201,21 @@ wire SNES_PARD_end = (SNES_PARDr[6:1] == 6'b000001);
 // Sample PAWR data earlier on CPU accesses, later on DMA accesses...
 wire SNES_PAWR_start = (SNES_PAWRr[6:1] == (({SNES_ADDR[22], SNES_ADDR[15:0]} == 17'h02100) ? 6'b111000 : 6'b100000));
 wire SNES_PAWR_end = (SNES_PAWRr[6:1] == 6'b000001);
+
+// FastROM state ($420D/MEMSEL, bit0 = FastROM enable). sd2snes has never
+// needed to track this anywhere - stock SuperFX/GSU carts are SlowROM-only
+// (see smc.c's cart-type detection), so this bus write was never relevant
+// for a GSU-family cart until FX3, which does use FastROM. $420D is in the
+// standard $42xx peripheral-address range exposed to the cart via SNES_PA/
+// PAWR, same mechanism already used for INIDISP snooping above.
+// (Declared/driven here, ahead of first use in the port map below, rather
+// than near the FASTROM-consuming instance further down the file.)
+reg FASTROM_r = 1'b0;
+always @(posedge CLK2) begin
+  if (SNES_PAWR_start & (SNES_PA == 8'h0D)) begin
+    FASTROM_r <= SNES_DATA[0];
+  end
+end
 wire SNES_RD_start = (SNES_READr[6:1] == 6'b111110);
 wire SNES_RD_end = (SNES_READr[6:1] == 6'b000001);
 wire SNES_WR_end = (SNES_WRITEr[6:1] == 6'b000001);
@@ -236,8 +258,8 @@ always @(posedge CLK2) begin
   // synchronize to the SNES cycle to avoid reading partial interrupt vector
   //if (SNES_WR_end | SNES_RD_end) begin
   if (SNES_cycle_end) begin
-    GSU_RONr    <= GSU_RON & GSU_GO;
-    GSU_RANr    <= GSU_RAN & GSU_GO;
+    GSU_RONr    <= IS_FX3 ? 1'b0 : (GSU_RON & GSU_GO);
+    GSU_RANr    <= IS_FX3 ? 1'b0 : (GSU_RAN & GSU_GO);
   end
 end
 
@@ -442,6 +464,8 @@ gsu snes_gsu (
   .GO(GSU_GO),
   
   .SPEED(dsp_feat[0]),
+  .IS_FX3(IS_FX3),
+  .FASTROM(FASTROM_r),
   
   // State debug read interface
   .PGM_ADDR(GSU_PGM_ADDR), // [9:0]
@@ -542,6 +566,7 @@ mcu_cmd snes_mcu_cmd(
 address snes_addr(
   .CLK(CLK2),
   .MAPPER(MAPPER),
+  .IS_FX3(IS_FX3),
   .featurebits(featurebits),
   .SNES_ADDR(SNES_ADDR), // requested address from SNES
   .SNES_PA(SNES_PA),

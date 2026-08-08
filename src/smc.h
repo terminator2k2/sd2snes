@@ -33,8 +33,7 @@
 #define DSPFW_DSP4 ((const uint8_t*)"/sd2snes/dsp4.bin")
 #define DSPFW_DSP1B ((const uint8_t*)"/sd2snes/dsp1b.bin")
 #define DSPFW_ST0010 ((const uint8_t*)"/sd2snes/st0010.bin")
-#define DSPFW_ST0011 ((const uint8_t*)"/sd2snes/st0011.bin")
-// extern const uint8_t *DSPFW_PTRTEST=((uint8_t*)"/sd2snes/hurz");
+#define STBIOS_FW ((const uint8_t*)"/sd2snes/STBIOS.bin")
 
 typedef struct __attribute__ ((__packed__)) {
   uint8_t maker[2];     /* 0xB0 */
@@ -86,6 +85,7 @@ typedef struct __attribute__ ((__packed__)) {
   uint8_t has_cx4;            /* CX4 presence flag */
   uint8_t has_obc1;           /* OBC1 presence flag */
   uint8_t has_gsu;            /* GSU presence flag */
+  uint8_t has_fx3;            /* FX3 (Reality Engine 2) variant of the GSU slot */
   uint8_t has_sa1;            /* SA-1 presence flag */
   uint8_t has_sdd1;           /* S-DD1 presence flag */
   uint8_t has_spc7110;        /* SPC7110 presence flag */
@@ -103,6 +103,9 @@ typedef struct __attribute__ ((__packed__)) {
 } snes_romprops_t;
 
 void smc_id(snes_romprops_t*, uint32_t file_offset);
+void smc_id_sdram(snes_romprops_t* props, uint32_t sram_base, uint32_t rom_size);
+void smc_id_sdram_window(snes_romprops_t* props, uint32_t sram_base,
+                         uint32_t rom_size, uint32_t valid_bytes);
 uint8_t smc_headerscore(uint32_t addr, snes_header_t* header, uint32_t file_offset);
 
 #endif

@@ -43,6 +43,8 @@
 #define FPGA_TX_BLOCK(x,y) spi_tx_block(x,y)
 #define FPGA_RX_BLOCK(x,y) spi_rx_block(x,y)
 
+#define FEAT_PF94          (1 << 15)
+#define FEAT_CC92          (1 << 14)
 #define FEAT_COMBO         (1 << 13)
 #define FEAT_SATELLABASE   (1 << 12)
 #define FEAT_DMA1          (1 << 11)
@@ -58,6 +60,17 @@
 
 #define FPGA_WAIT_RDY()    do {__NOP(); __NOP(); __NOP(); __NOP(); while(!BITBAND(SPI_REGS->SPI_SR, SPI_TFE)); __NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP(); while(!BITBAND(FPGA_MCU_RDY_REG->GPIO_I, FPGA_MCU_RDY_BIT)); } while (0)
 
+/* Used ONLY by the ROM patcher.  An enhancement-chip FPGA core can leave the
+   MCU SDRAM-port ready line (FPGA_MCU_RDY) deasserted, which makes the unbounded
+   FPGA_WAIT_RDY busy-wait hang the MCU forever. This variant bounds the MCU_RDY
+   wait: if it never asserts, it sets (toflag) to 1 and bails out, so the patch
+   aborts the load cleanly instead of wedging the menu. The bound is far beyond
+   any legitimate per-byte SDRAM cycle (~tens of ms at 96 MHz) yet finite. The
+   timing-critical global paths (DMA, savestate, normal load) keep the original
+   unbounded FPGA_WAIT_RDY and are unaffected. */
+#define FPGA_MCU_RDY_TIMEOUT    (5000000UL)
+#define FPGA_WAIT_RDY_TO(toflag) do {__NOP(); __NOP(); __NOP(); __NOP(); while(!BITBAND(SPI_REGS->SPI_SR, SPI_TFE)); __NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP();__NOP(); { uint32_t _wto = FPGA_MCU_RDY_TIMEOUT; while(!BITBAND(FPGA_MCU_RDY_REG->GPIO_I, FPGA_MCU_RDY_BIT)) { if(!--_wto) { (toflag) = 1; break; } } } } while (0)
+
 /* command parameters */
 #define FPGA_MEM_AUTOINC        (0x8)
 #define FPGA_SDDMA_PARTIAL      (0x4)
@@ -68,6 +81,7 @@
 /* commands */
 #define FPGA_CMD_SETADDR         (0x00)
 #define FPGA_CMD_SETROMMASK      (0x10)
+#define FPGA_CMD_SETROMMASK_B    (0x50)
 #define FPGA_CMD_SETRAMMASK      (0x20)
 #define FPGA_CMD_SETRAMBASE      (0x20 | 1)
 #define FPGA_CMD_SETMAPPER(x)    (0x30 | (x & 15))
@@ -124,6 +138,7 @@ void set_msu_status(uint16_t status);
 void set_saveram_base(uint8_t);
 void set_saveram_mask(uint32_t);
 void set_rom_mask(uint32_t);
+void set_rom_mask_b(uint32_t);
 void set_mapper(uint8_t val);
 void fpga_sddma(uint8_t tgt, uint8_t partial);
 void fpga_set_sddma_range(uint16_t start, uint16_t end);

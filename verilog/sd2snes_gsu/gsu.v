@@ -58,6 +58,8 @@ module gsu(
   output        RAN,
 
   input         SPEED,
+  input         IS_FX3, // FX3 (Reality Engine 2): different version reg, R15 poll, MERGE dispatch
+  input         FASTROM, // $420D/MEMSEL state - stock GSU is SlowROM-only so this was never tracked before; FX3 games can use FastROM
 
   // State debug read interface
   input  [9:0]  PGM_ADDR, // [9:0]
@@ -217,6 +219,19 @@ parameter
 `define OP_LOB           8'h9E
 `define OP_HIB           8'hC0
 `define OP_MERGE         8'h70
+// FX3: MERGE is repurposed as a command dispatcher (R0 selects the command).
+// Values match MesenCE's Fx3Command enum exactly (implicit 0-based ordering).
+// ChunkyToPlanarA/B/C exist on real FX3 silicon to finish PLOT's pixel-plane
+// conversion; our PLOT already writes final planar data directly (see
+// bmp_addr_r), so those three are treated as no-ops here - see design notes.
+parameter [7:0]
+  FX3_CMD_CHUNKY_A = 8'h00,
+  FX3_CMD_CHUNKY_B = 8'h01,
+  FX3_CMD_CHUNKY_C = 8'h02,
+  FX3_CMD_CLEAR_A  = 8'h03,
+  FX3_CMD_CLEAR_B  = 8'h04,
+  FX3_CMD_CLEAR_C  = 8'h05
+;
 // multiply
 `define OP_FMULT_LMULT   8'h9F
 `define OP_MULT          8'h80,8'h81,8'h82,8'h83,8'h84,8'h85,8'h86,8'h87,8'h88,8'h89,8'h8A,8'h8B,8'h8C,8'h8D,8'h8E,8'h8F
@@ -382,7 +397,11 @@ reg [7:0]  SCBR_r;  // 3038
 reg [7:0]  CLSR_r;  // 3039
 reg [7:0]  SCMR_r;  // 303A
 reg [7:0]  VCR_r;   // 303B
-reg        RAMBR_r; // 303C
+reg  [2:0] RAMBR_r; // 303C - widened from 1 bit (stock GSU: 2x64KB=128KB) to
+                     // 3 bits (8x64KB=512KB, the full physical "Bus 2" SRAM
+                     // chip capacity) for FX3. Gated by IS_FX3 at every
+                     // write site below so stock GSU behavior (real hardware
+                     // genuinely only has 1 bank-select bit) is unchanged.
 reg [15:0] CBR_r;   // 303E
 // unmapped
 reg [7:0]  COLR_r;
@@ -392,6 +411,33 @@ reg [3:0]  DREG_r;
 reg [7:0]  ROMRDBUF_r;
 reg [15:0] RAMWRBUF_r; // FIXME: this should be 8b
 reg [15:0] RAMADDR_r;
+
+// FX3 ClearA/B/C sequencer state (see ST_EXE_FX3_CLEAR).
+// Mirrors MesenCE's ProcessClearCommandFx3: outer loop i=0..17 (18 "screens"),
+// inner loop j=start..end (9 values per command), 64 bytes per (i,j) pair.
+reg  [4:0] fx3_j_start_r, fx3_j_end_r;
+reg  [4:0] fx3_i_r;
+reg  [4:0] fx3_j_r;
+reg  [5:0] fx3_k_r;
+reg  [2:0] fx3_saved_rambr_r; // caller's RAMBR, saved/restored around the clear
+                               // (the clear always targets a fixed bank - see
+                               // ST_EXE_FX3_CLEAR - matching Mesen's hardcoded
+                               // 0x10000 offset into its flat GSU RAM array)
+reg        fx3_clear_req_sent_r; // guards against re-triggering ~stb_busy_r
+                                  // before it has latched (see ST_EXE_FX3_CLEAR)
+
+// Same 64-byte checkerboard MesenCE's ClearCharFx3 clearPattern[] writes:
+// bytes 0-15 alternate FF/00 starting with FF, 16-47 are all 00, 48-63
+// alternate 00/FF starting with 00.
+reg  [7:0] fx3_clear_byte;
+always @(*) begin
+  if (fx3_k_r < 6'd16)
+    fx3_clear_byte = fx3_k_r[0] ? 8'h00 : 8'hFF;
+  else if (fx3_k_r < 6'd48)
+    fx3_clear_byte = 8'h00;
+  else
+    fx3_clear_byte = fx3_k_r[0] ? 8'hFF : 8'h00;
+end
 
 initial SFR_r = 0;
 initial BRAMR_r = 0;
@@ -412,6 +458,10 @@ initial DREG_r = 0;
 initial ROMRDBUF_r = 0;
 initial RAMWRBUF_r = 0;
 initial RAMADDR_r = 0;
+initial fx3_i_r = 0;
+initial fx3_j_r = 0;
+initial fx3_k_r = 0;
+initial fx3_clear_req_sent_r = 0;
 
 // Important breakouts
 assign SFR_Z    = SFR_r[1];
@@ -638,12 +688,12 @@ always @(posedge CLK) begin
     PBR_r   <= 0;
     //ROMBR_r <= 0;
     //RAMBR_r <= 0;
-    SCBR_r  <= 0;
+    SCBR_r  <= IS_FX3 ? 8'h40 : 8'h00;
     SCMR_r  <= 0;
     COLR_r  <= 0;
     POR_r   <= 0;
     BRAMR_r <= 0;
-    VCR_r   <= 4;
+    VCR_r   <= IS_FX3 ? 8'h52 : 8'h04;
     CFGR_r  <= 0;
     CLSR_r  <= 0;
 
@@ -670,8 +720,8 @@ always @(posedge CLK) begin
       if (SNES_RD_start) begin
         if (~|addr_in_r[9:8]) begin
           casex (addr_in_r[7:0])
-            ADDR_GPRL : begin data_out_r <= REG_r[addr_in_r[4:1]][7:0];  if (~SFR_GO) data_enable_r <= 1; end
-            ADDR_GPRH : begin data_out_r <= REG_r[addr_in_r[4:1]][15:8]; if (~SFR_GO) data_enable_r <= 1; end
+            ADDR_GPRL : begin data_out_r <= REG_r[addr_in_r[4:1]][7:0];  if (~SFR_GO | (IS_FX3 & (addr_in_r[4:1] == R15))) data_enable_r <= 1; end
+            ADDR_GPRH : begin data_out_r <= REG_r[addr_in_r[4:1]][15:8]; if (~SFR_GO | (IS_FX3 & (addr_in_r[4:1] == R15))) data_enable_r <= 1; end
 
             ADDR_SFR  : begin data_out_r <= SFR_r[7:0];  data_enable_r <= 1; end
             ADDR_SFR+1: begin data_out_r <= SFR_r[15:8]; data_enable_r <= 1; end
@@ -746,7 +796,7 @@ always @(posedge CLK) begin
           ADDR_SFR  : SFR_r[5:1] <= snes_writebuf_data_r[5:1];
           ADDR_SFR+1: {SFR_r[15],SFR_r[12:8]} <= {snes_writebuf_data_r[7],snes_writebuf_data_r[4:0]};
           ADDR_BRAMR: BRAMR_r[0] <= snes_writebuf_data_r[0];
-          ADDR_PBR  : PBR_r <= snes_writebuf_data_r[6:0]; // upper bit looks to be written with open bus value in voxel demo
+          ADDR_PBR  : PBR_r <= IS_FX3 ? snes_writebuf_data_r : {1'b0, snes_writebuf_data_r[6:0]}; // upper bit written with open bus value in voxel demo (stock only). MesenCE masks PBR to 7 bits unconditionally, but MiSTer's independent implementation genuinely relies on PBR>=0x80 support throughout its core fetch logic (not dead code) and MiSTer successfully runs DOOM into real gameplay - restored the 8-bit width for FX3 since the 7-bit-only revert (0021) didn't fix the game-start hang anyway.
           ADDR_CFGR : {CFGR_r[7],CFGR_r[5]} <= {snes_writebuf_data_r[7],snes_writebuf_data_r[5]};
           ADDR_SCBR : SCBR_r <= snes_writebuf_data_r;
           ADDR_CLSR : CLSR_r[0] <= snes_writebuf_data_r[0];
@@ -778,7 +828,7 @@ always @(posedge CLK) begin
 
       SREG_r     <= e2r_sreg_r;
       DREG_r     <= e2r_dreg_r;
-      if (e2r_wpbr_r)  PBR_r <= e2r_pbr_r[6:0];
+      if (e2r_wpbr_r)  PBR_r <= IS_FX3 ? e2r_pbr_r[7:0] : {1'b0, e2r_pbr_r[6:0]};
       if (e2r_wpor_r)  POR_r <= e2r_por_r;
       if (e2r_wcolr_r) COLR_r <= e2r_colr_r;
     end
@@ -812,7 +862,7 @@ always @(posedge CLK) begin
           R15: begin REG_r[R15] <= e2r_data_r;                               end
         endcase
       end
-      else begin
+      else if (~IS_FX3 | SFR_GO) begin
         // TODO: integrate this into one of the non-GSU clocks.  Gets tricky with LOOP - could adjust R15 in DECODE and write in EXECUTE when we would normally do R15+1 or branch target.
         REG_r[R15] <= REG_r[R15] + 1;
       end
@@ -885,20 +935,20 @@ always @(posedge CLK) begin
   else begin
     case (ROM_STATE)
       ST_ROM_IDLE: begin
-        if (SCMR_RON & ROM_BUS_RDY & SFR_GO) begin
-          if (cache_rom_rd_r) begin
-            rom_bus_rrq_r <= 1;
-            rom_bus_addr_r <= cache_addr_r;
-            rom_bus_word_r <= cache_word_r;
-            rom_busy_r <= 1;
-            ROM_STATE <= ST_ROM_FETCH_RD;
-          end
-          else if (prf_rom_rd_r) begin
+        if ((IS_FX3 | SCMR_RON) & ROM_BUS_RDY & SFR_GO) begin
+          if (prf_rom_rd_r) begin
             rom_bus_rrq_r <= 1;
             rom_bus_addr_r <= prf_addr_r;
             rom_bus_word_r <= prf_word_r;
             rom_busy_r <= 1;
             ROM_STATE <= ST_ROM_DATA_RD;
+          end
+          else if (cache_rom_rd_r) begin
+            rom_bus_rrq_r <= 1;
+            rom_bus_addr_r <= cache_addr_r;
+            rom_bus_word_r <= cache_word_r;
+            rom_busy_r <= 1;
+            ROM_STATE <= ST_ROM_FETCH_RD;
           end
         end
       end
@@ -960,7 +1010,23 @@ always @(posedge CLK) begin
   else begin
     case (RAM_STATE)
       ST_RAM_IDLE: begin
-        if (SCMR_RAN & RAM_BUS_RDY & SFR_GO) begin
+        if (IS_FX3 & stb_ram_wr_r & RAM_BUS_RDY) begin
+          // FX3 Clear/MERGE write: confirmed against Randal Linden's ClearCharFx3
+          // (an unconditional memcpy, no RAN/GsuRamAccess/SFR.Running dependency).
+          // Gating this on SFR_GO or SCMR_RAN risked a deadlock if MERGE runs
+          // before the game has ever written SCMR (which is what sets RAN) --
+          // mirrors the fix already confirmed and shipped in the MiSTer core.
+          ram_bus_wrq_r <= 1;
+          ram_bus_word_r <= 0;
+          ram_bus_addr_r <= stb_addr_r;
+          ram_bus_data_r <= stb_data_r;
+          ram_busy_r <= 1;
+          ram_word_r <= stb_word_r;
+          ram_wr_r <= 1;
+          RAM_STATE <= ST_RAM_ACCESS;
+          ram_state_end_r <= ST_RAM_STB_END;
+        end
+        else if ((IS_FX3 | SCMR_RAN) & RAM_BUS_RDY & SFR_GO) begin
           if (exe_ram_rd_r) begin
             ram_bus_rrq_r <= 1;
             ram_bus_word_r <= 0;
@@ -981,7 +1047,7 @@ always @(posedge CLK) begin
             RAM_STATE <= ST_RAM_ACCESS;
             ram_state_end_r <= ST_RAM_FETCH_END;
           end
-          else if (stb_ram_wr_r) begin
+		  else if (stb_ram_wr_r) begin
             ram_bus_wrq_r <= 1;
             ram_bus_word_r <= 0;
             ram_bus_addr_r <= stb_addr_r;
@@ -991,7 +1057,7 @@ always @(posedge CLK) begin
             ram_wr_r <= 1;
             RAM_STATE <= ST_RAM_ACCESS;
             ram_state_end_r <= ST_RAM_STB_END;
-          end
+          end	
           else if (bmp_ram_rd_r) begin
             ram_bus_rrq_r <= 1;
             ram_bus_word_r <= 0;
@@ -1428,7 +1494,7 @@ always @(posedge CLK) begin
           stb_ram_wr_r <= 1;
           stb_word_r <= e2s_word_r;
 
-          stb_addr_r <= {4'hE,3'h0,RAMBR_r,RAMADDR_r};
+          stb_addr_r <= {4'hE,1'h0,RAMBR_r,RAMADDR_r};
           stb_data_r <= RAMWRBUF_r;
 
           STB_STATE <= ST_STB_MEMORY_WAIT;
@@ -1557,7 +1623,21 @@ always @(posedge CLK) begin
     end
 
     // PBR is updated by SNES or JMP instructions.
-    fetch_rom_r <= (PBR_r < 8'h60);
+    // Stock GSU: banks < $60 are ROM, >= $60 is SAVERAM.
+    // FX3 extends its own program-fetch range to banks < $70 (the 3rd MB) -
+    // banks $70-$7F remain CPU-only per the FX3 spec ("GSU can see up to the
+    // third megabyte, CPU can see all 4"). Additionally, banks $60-$6F
+    // mirror to $E0-$EF and are valid for BOTH FX3 and the 65816 (confirmed
+    // directly by the user's own memory-map description: "$60-$6F (mirrored
+    // to $E0-$EF) are for both FX3 and 65816 - this adds 1MB. Banks $F0-$FF
+    // are for 65816 only - this adds another 1MB"). So the exception here
+    // must cover $E0-$EF specifically, NOT the whole $80-$FF range: the
+    // earlier "PBR>=$80 & FASTROM" version (borrowed from MiSTer's GSU.vhd)
+    // was too broad since it also wrongly allowed $F0-$FF; removing the
+    // exception entirely (tested, confirmed to break FX3 Star Fox - reverting
+    // it fixed Star Fox again) was too narrow since it wrongly excluded
+    // $E0-$EF too. This is the precise middle ground.
+    fetch_rom_r <= (PBR_r < (IS_FX3 ? 8'h70 : 8'h60)) | (IS_FX3 & PBR_r[7] & FASTROM);
 
     case (FETCH_STATE)
       ST_FETCH_IDLE: begin
@@ -1578,11 +1658,10 @@ always @(posedge CLK) begin
 
         fetch_install_val_r <= 0;
         fetch_cache_match_r <= (REG_r[R15][15:0] - CBR_r) < 512;
-        cache_gsu_addr_r    <= REG_r[R15][8:0];
-        //cache_gsu_addr_r    <= (REG_r[R15][15:0] - CBR_r);
+        cache_gsu_addr_r    <= REG_r[R15][15:0] - CBR_r; // was REG_r[R15][8:0] (ignored CBR_r entirely) - invisible whenever CBR_r=0, which is every test built so far (none executed CACHE), but wrong for any non-zero CBR, which is exactly what CACHE sets up for real, substantial GSU programs
 
         // need to use PBR directly here because of prior cycle update
-        cache_addr_r <= (PBR_r < 8'h60) ? ((PBR_r[6] ? {PBR_r,REG_r[R15]} : {PBR_r,REG_r[R15][14:0]}) & ROM_MASK)
+        cache_addr_r <= ((PBR_r < (IS_FX3 ? 8'h70 : 8'h60)) | (IS_FX3 & PBR_r[7] & FASTROM)) ? ((PBR_r[6] ? {PBR_r,REG_r[R15]} : {PBR_r,REG_r[R15][14:0]}) & ROM_MASK)
                                         : 24'hE00000 + ({PBR_r[0],REG_r[R15]} & SAVERAM_MASK);
 
         FETCH_STATE <= ST_FETCH_CACHE;
@@ -1800,7 +1879,8 @@ parameter
   ST_EXE_EXECUTE     = 8'b00001000,
   ST_EXE_MEMORY      = 8'b00010000,
   ST_EXE_MEMORY_WAIT = 8'b00100000,
-  ST_EXE_WAIT        = 8'b01000000
+  ST_EXE_WAIT        = 8'b01000000,
+  ST_EXE_FX3_CLEAR   = 8'b10000000 // FX3: MERGE-dispatched ClearA/B/C sequencer
   ;
 reg [7:0]  EXE_STATE; initial EXE_STATE = ST_EXE_IDLE;
 
@@ -2022,6 +2102,15 @@ always @(posedge CLK) begin
               // clear POR
               //e2r_wpor_r <= 1;
               //e2r_por_r <= 0;
+
+              if (IS_FX3) begin
+                // FX3 has no IRQ line - the SNES CPU polls R15 to detect
+                // completion, so STOP resets it to 0 (mirrors MesenCE's
+                // WriteRegister(15, 0) in Gsu::STOP()).
+                e2r_val_r <= 1;
+                e2r_destnum_r <= R15;
+                e2r_data_pre_r <= 16'h0000;
+              end
             end
             //OP_NOP            : begin end
             `OP_CACHE          : begin
@@ -2232,10 +2321,20 @@ always @(posedge CLK) begin
               e2r_s_r    <= exe_result[7];
             end
             `OP_MERGE         : begin
-              exe_result = {REG_r[R7][15:8],REG_r[R8][15:8]};
+              if (IS_FX3) begin
+                // Command dispatch (R0) now happens at the EXE_STATE
+                // transition below, in the same cycle it's consumed -
+                // deciding it here via an intermediate register caused a
+                // one-cycle stale-read hazard (fx3_clear_start_r was read
+                // here in the same always block/edge it was written,
+                // seeing last cycle's value, not this one's).
+              end
+              else begin
+                exe_result = {REG_r[R7][15:8],REG_r[R8][15:8]};
 
-              e2r_val_r  <= 1;
-              e2r_data_pre_r <= exe_result;
+                e2r_val_r  <= 1;
+                e2r_data_pre_r <= exe_result;
+              end
             end
 
             // MULTIPLY
@@ -2310,12 +2409,102 @@ always @(posedge CLK) begin
           endcase
         end
 
-        EXE_STATE <= ST_EXE_MEMORY;
+        if (IS_FX3 & (exe_opcode_r == `OP_MERGE)) begin
+          // R0 selects the command (see FX3_CMD_* above). Decided and
+          // consumed right here in one step - the earlier version split
+          // this across two places (decode in the OP_MERGE case above,
+          // check here) and read a register in the same cycle/edge it was
+          // written, so it always saw the previous MERGE call's result
+          // instead of this one's.
+          case (REG_r[R0][7:0])
+            FX3_CMD_CLEAR_A: begin
+              fx3_j_start_r <= 5'd0;  fx3_j_end_r <= 5'd8;
+              fx3_i_r <= 5'd0; fx3_j_r <= 5'd0; fx3_k_r <= 6'd0;
+              // Mesen's ClearCharFx3 always writes to a fixed offset
+              // (_gsuRam + 0x10000 + offset) in its flat GSU RAM array,
+              // which corresponds to bank 1 in sd2snes's banked RAMBR
+              // addressing - not whichever bank the caller had selected.
+              // Save the caller's RAMBR so it can be restored once the
+              // clear completes (see ST_EXE_FX3_CLEAR/ST_EXE_WAIT).
+              fx3_saved_rambr_r <= RAMBR_r;
+              RAMBR_r <= 3'd1;
+              EXE_STATE <= ST_EXE_FX3_CLEAR;
+            end
+            FX3_CMD_CLEAR_B: begin
+              fx3_j_start_r <= 5'd9;  fx3_j_end_r <= 5'd17;
+              fx3_i_r <= 5'd0; fx3_j_r <= 5'd9; fx3_k_r <= 6'd0;
+              fx3_saved_rambr_r <= RAMBR_r;
+              RAMBR_r <= 3'd1;
+              EXE_STATE <= ST_EXE_FX3_CLEAR;
+            end
+            FX3_CMD_CLEAR_C: begin
+              fx3_j_start_r <= 5'd18; fx3_j_end_r <= 5'd26;
+              fx3_i_r <= 5'd0; fx3_j_r <= 5'd18; fx3_k_r <= 6'd0;
+              fx3_saved_rambr_r <= RAMBR_r;
+              RAMBR_r <= 3'd1;
+              EXE_STATE <= ST_EXE_FX3_CLEAR;
+            end
+            default: begin
+              // ChunkyToPlanarA/B/C or unmapped command: no hardware effect
+              // here, completes like a NOP.
+              EXE_STATE <= ST_EXE_WAIT;
+            end
+          endcase
+        end
+        else begin
+          EXE_STATE <= ST_EXE_MEMORY;
+        end
+      end
+      ST_EXE_FX3_CLEAR: begin
+        // Walks the same 64-byte checkerboard pattern MesenCE's
+        // ProcessClearCommandFx3/ClearCharFx3 write, one byte per RAM-bus
+        // write through the existing store-buffer port (same one OP_ST
+        // uses). NOTE: the per-byte latency here is lat_ram_r - the same
+        // single-write latency as any other GSU RAM store - because that's
+        // the best-grounded placeholder available, not a measured value
+        // from real FX3 hardware. See design notes: this needs verification
+        // against a real cart or working test ROM.
+        if (~stb_busy_r & ~fx3_clear_req_sent_r) begin
+          e2s_req_r  <= 1;
+          e2s_word_r <= 0; // byte write
+          RAMWRBUF_r <= fx3_clear_byte;
+          RAMADDR_r  <= fx3_i_r*16'd64 + fx3_j_r*16'd1280 + {10'h000,fx3_k_r};
+          fx3_clear_req_sent_r <= 1;
+
+          if (fx3_k_r == 6'd63) begin
+            fx3_k_r <= 6'd0;
+            if (fx3_j_r == fx3_j_end_r) begin
+              fx3_j_r <= fx3_j_start_r;
+              if (fx3_i_r == 5'd17) begin
+                // Confirmed directly against Randal Linden's reference
+                // (Gsu::ProcessClearCommandFx3: for(i=0; i<18; i++)) - the
+                // earlier "extend to i<23" change was a speculative guess
+                // from an early spec screenshot that was never actually
+                // checked against the real implementation, and was wrong.
+                RAMBR_r <= fx3_saved_rambr_r; //(restore whatever it was)
+                EXE_STATE <= ST_EXE_WAIT; // all (end-start+1)*18 blocks written
+              end
+              else begin
+                fx3_i_r <= fx3_i_r + 5'd1;
+              end
+            end
+            else begin
+              fx3_j_r <= fx3_j_r + 5'd1;
+            end
+          end
+          else begin
+            fx3_k_r <= fx3_k_r + 6'd1;
+          end
+        end
+        else if (fx3_clear_req_sent_r) begin
+          fx3_clear_req_sent_r <= 0;
+        end
       end
       ST_EXE_MEMORY: begin
         if (op_complete) begin
           case (exe_opcode_r)
             `OP_STOP           : begin
+			  e2r_data_r <= e2r_data_pre_r;
               if (~stb_busy_r & ~SFR_RR) begin
                 // don't allow STOP to complete until the store buffer is flushed
                 EXE_STATE <= ST_EXE_WAIT;
@@ -2387,7 +2576,7 @@ always @(posedge CLK) begin
                   exe_word_r <= 1;
 
                   RAMADDR_r <= {7'h00,exe_operand_r[7:0],1'b0};
-                  exe_addr_r <= {4'hE,3'h0,RAMBR_r,7'h00,exe_operand_r[7:0],1'b0};
+                  exe_addr_r <= {4'hE,1'h0,RAMBR_r,7'h00,exe_operand_r[7:0],1'b0};
                   EXE_STATE <= ST_EXE_MEMORY_WAIT;
                 end
               end
@@ -2425,7 +2614,7 @@ always @(posedge CLK) begin
                   exe_word_r <= 1;
 
                   RAMADDR_r <= exe_operand_r;
-                  exe_addr_r <= {4'hE,3'h0,RAMBR_r,exe_operand_r};
+                  exe_addr_r <= {4'hE,1'h0,RAMBR_r,exe_operand_r};
                   EXE_STATE <= ST_EXE_MEMORY_WAIT;
                 end
               end
@@ -2478,7 +2667,7 @@ always @(posedge CLK) begin
                 exe_word_r <= ~exe_alt1_r;
 
                 RAMADDR_r <= exe_srcn_r;
-                exe_addr_r <= {4'hE,3'h0,RAMBR_r,exe_srcn_r};
+                exe_addr_r <= {4'hE,1'h0,RAMBR_r,exe_srcn_r};
 
                 EXE_STATE <= ST_EXE_MEMORY_WAIT;
               end
@@ -2622,7 +2811,7 @@ always @(posedge CLK) begin
 
             // ROMB needs to write ROMBR
             if (exe_wrombr_r) ROMBR_r <= exe_src_r[6:0];
-            if (exe_wrambr_r) RAMBR_r <= exe_src_r[0];
+            if (exe_wrambr_r) RAMBR_r <= IS_FX3 ? exe_src_r[2:0] : {2'b00, exe_src_r[0]};
           end
 
           exe_byte_r <= fetch_data_r;
@@ -2685,7 +2874,7 @@ always @(posedge CLK) begin
     brk_error        <= fetch_error; // FIXME: set this state based on opcode or other error condition
 
 
-    brk_addr_r <= (CONFIG_ADDR_WATCH[23:16] < 8'h60) ? ((CONFIG_ADDR_WATCH[22] ? CONFIG_ADDR_WATCH : {CONFIG_ADDR_WATCH[20:16],CONFIG_ADDR_WATCH[14:0]}) & ROM_MASK)
+    brk_addr_r <= ((CONFIG_ADDR_WATCH[23:16] < (IS_FX3 ? 8'h70 : 8'h60)) | (IS_FX3 & CONFIG_ADDR_WATCH[23] & FASTROM)) ? ((CONFIG_ADDR_WATCH[22] ? CONFIG_ADDR_WATCH : {CONFIG_ADDR_WATCH[20:16],CONFIG_ADDR_WATCH[14:0]}) & ROM_MASK)
                                                      : 24'hE00000 + (CONFIG_ADDR_WATCH & SAVERAM_MASK);
   end
 end
@@ -2947,6 +3136,6 @@ assign DATA_OUT    = data_out_r;
 assign GO          = SFR_GO;
 assign RON         = SCMR_RON;
 assign RAN         = SCMR_RAN;
-assign IRQ         = SFR_IRQ;
+assign IRQ         = IS_FX3 ? 1'b0 : SFR_IRQ;
 
 endmodule

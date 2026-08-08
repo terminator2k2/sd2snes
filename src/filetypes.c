@@ -36,6 +36,7 @@
 #include "led.h"
 #include "sort.h"
 #include "cfg.h"
+#include "msu1.h"   /* menu_sfx_pump: keep a playing effect fed during dir scans */
 
 #include "timer.h"
 
@@ -73,6 +74,7 @@ printf("opendir res=%d\n", res);
 printf("start\n");
   if (res == FR_OK) {
     for (;;) {
+      menu_sfx_pump();  /* keep a playing menu effect fed while scanning a big dir */
       res = f_readdir(&dir, &fno);
       if(res != FR_OK || fno.fname[0] == 0 || numentries >= 16000)break;
       fn = *fno.lfname ? fno.lfname : fno.fname;
@@ -80,6 +82,7 @@ printf("start\n");
       if(is_requested_filetype(type, filetypes)) {
         switch(type) {
           case TYPE_ROM:
+          case TYPE_ROM_ST:
           case TYPE_SPC:
           case TYPE_SUBDIR:
           case TYPE_PARENT:
@@ -153,6 +156,9 @@ SNES_FTYPE determine_filetype(FILINFO fno) {
      ||(!strcasecmp(ext+1, "SGB"))
     ) {
     return TYPE_ROM;
+  }
+  if(!strcasecmp(ext+1, "ST")) {
+    return TYPE_ROM_ST;
   }
 /*  if(  (!strcasecmp(ext+1, "IPS"))
      ||(!strcasecmp(ext+1, "UPS"))
