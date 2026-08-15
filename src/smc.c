@@ -367,7 +367,7 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
        * Unlike stock GSU (SlowROM only, hence the strict map==0x20 check
        * above), FX3 adds FastROM support, so accept map 0x20 OR 0x30 here -
        * don't assume the header flags SlowROM. */
-      else if ((header->map & 0xef) == 0x20 && header->carttype == 0x17) {
+      else if ((header->map & 0xef) == 0x20 && (header->carttype == 0x17 || header->carttype == 0x18)) {
         props->has_gsu = 1;
         props->has_fx3 = 1;
         props->fpga_conf = FPGA_GSU;
