@@ -426,6 +426,36 @@ reg  [2:0] fx3_saved_rambr_r; // caller's RAMBR, saved/restored around the clear
 reg        fx3_clear_req_sent_r; // guards against re-triggering ~stb_busy_r
                                   // before it has latched (see ST_EXE_FX3_CLEAR)
 
+// fx3_i_r*64 + fx3_j_r*1280, held stable across the 64-byte inner (k) loop
+// and only recomputed on the rare cycles where i or j actually change (see
+// ST_EXE_FX3_CLEAR). This keeps the per-byte hot path (RAMADDR_r <= ...)
+// down to a single small add instead of two multiplies + address-add every
+// cycle - the original single-line combined computation
+// (fx3_i_r*64 + fx3_j_r*1280 + fx3_k_r, recomputed every cycle) was the
+// source of the 2 setup timing violations on TS_CLK21/85.75MHz: XST shared
+// one MULT18X18 between the two multiplies via an extra operand-select mux
+// stage, and that mux chain plus the multiplier delay didn't fit in one
+// 11.661ns period on a Spartan-3 -4 part. Splitting the multiply out to the
+// infrequent i/j-update cycles removes it from the cycle-critical path.
+reg [15:0] fx3_base_addr_r;
+
+// x*1280 without an embedded multiplier: 1280 = 5*256, so x*1280 =
+// ((x<<2)+x) << 8. Synthesizes to one small adder plus a free wire shift -
+// deliberately avoids inferring a MULT18X18 for this control-plane address
+// generator (see fx3_base_addr_r above).
+function [15:0] fx3_mul1280;
+  input [4:0] x;
+  reg   [8:0] x_shl2; // x*4, explicitly zero-extended before the shift so
+  reg   [8:0] x5;     // the width is unambiguous regardless of tool/LRM
+                       // shift-width inference (max x=31 -> x*4=124, x*5=155,
+                       // both comfortably fit in 9 bits)
+  begin
+    x_shl2 = {4'b0, x} << 2;
+    x5     = x_shl2 + {4'b0, x}; // x*4 + x = x*5
+    fx3_mul1280 = {x5[7:0], 8'b0}; // x*5 (fits in 8 bits) * 256 = x*1280
+  end
+endfunction
+
 // Same 64-byte checkerboard MesenCE's ClearCharFx3 clearPattern[] writes:
 // bytes 0-15 alternate FF/00 starting with FF, 16-47 are all 00, 48-63
 // alternate 00/FF starting with 00.
@@ -462,6 +492,7 @@ initial fx3_i_r = 0;
 initial fx3_j_r = 0;
 initial fx3_k_r = 0;
 initial fx3_clear_req_sent_r = 0;
+initial fx3_base_addr_r = 0;
 
 // Important breakouts
 assign SFR_Z    = SFR_r[1];
@@ -1917,6 +1948,10 @@ reg        exe_carry;
 wire [31:0] exe_fmult_out;
 wire [15:0] exe_mult_out;
 wire [15:0] exe_umult_out;
+// Dedicated select for OP_MULT/OP_UMULT, kept separate from the shared
+// `exe_result` variable so synthesis doesn't factor this mux together
+// with unrelated e2r_data_r drivers (see OP_MULT below / TS_CLK21 fix).
+wire [15:0] exe_mult_sel_result = exe_alt1_r ? exe_umult_out : exe_mult_out;
 
 reg [7:0]  exe_byte_r;
 
@@ -2420,6 +2455,7 @@ always @(posedge CLK) begin
             FX3_CMD_CLEAR_A: begin
               fx3_j_start_r <= 5'd0;  fx3_j_end_r <= 5'd8;
               fx3_i_r <= 5'd0; fx3_j_r <= 5'd0; fx3_k_r <= 6'd0;
+              fx3_base_addr_r <= fx3_mul1280(5'd0); // i=0,j=0 -> 0
               // Mesen's ClearCharFx3 always writes to a fixed offset
               // (_gsuRam + 0x10000 + offset) in its flat GSU RAM array,
               // which corresponds to bank 1 in sd2snes's banked RAMBR
@@ -2433,6 +2469,7 @@ always @(posedge CLK) begin
             FX3_CMD_CLEAR_B: begin
               fx3_j_start_r <= 5'd9;  fx3_j_end_r <= 5'd17;
               fx3_i_r <= 5'd0; fx3_j_r <= 5'd9; fx3_k_r <= 6'd0;
+              fx3_base_addr_r <= fx3_mul1280(5'd9); // i=0,j=9 -> 11520
               fx3_saved_rambr_r <= RAMBR_r;
               RAMBR_r <= 3'd1;
               EXE_STATE <= ST_EXE_FX3_CLEAR;
@@ -2440,6 +2477,7 @@ always @(posedge CLK) begin
             FX3_CMD_CLEAR_C: begin
               fx3_j_start_r <= 5'd18; fx3_j_end_r <= 5'd26;
               fx3_i_r <= 5'd0; fx3_j_r <= 5'd18; fx3_k_r <= 6'd0;
+              fx3_base_addr_r <= fx3_mul1280(5'd18); // i=0,j=18 -> 23040
               fx3_saved_rambr_r <= RAMBR_r;
               RAMBR_r <= 3'd1;
               EXE_STATE <= ST_EXE_FX3_CLEAR;
@@ -2468,7 +2506,12 @@ always @(posedge CLK) begin
           e2s_req_r  <= 1;
           e2s_word_r <= 0; // byte write
           RAMWRBUF_r <= fx3_clear_byte;
-          RAMADDR_r  <= fx3_i_r*16'd64 + fx3_j_r*16'd1280 + {10'h000,fx3_k_r};
+          // Hot path: just fx3_base_addr_r + k, no multiply here (see
+          // fx3_base_addr_r declaration above) - fx3_base_addr_r already
+          // holds fx3_i_r*64 + fx3_j_r*1280 for the CURRENT i/j, and only
+          // the branches below (taken once every 64 cycles, when k wraps)
+          // update it for the next i/j.
+          RAMADDR_r  <= fx3_base_addr_r + {10'h000,fx3_k_r};
           fx3_clear_req_sent_r <= 1;
 
           if (fx3_k_r == 6'd63) begin
@@ -2483,17 +2526,25 @@ always @(posedge CLK) begin
                 // checked against the real implementation, and was wrong.
                 RAMBR_r <= fx3_saved_rambr_r; //(restore whatever it was)
                 EXE_STATE <= ST_EXE_WAIT; // all (end-start+1)*18 blocks written
+                // (no need to refresh fx3_base_addr_r - clear is done and
+                // it won't be read again until the next CLEAR_A/B/C command,
+                // which sets it explicitly)
               end
               else begin
                 fx3_i_r <= fx3_i_r + 5'd1;
+                // next i, j wraps back to j_start
+                fx3_base_addr_r <= {(fx3_i_r + 5'd1), 6'b0} + fx3_mul1280(fx3_j_start_r);
               end
             end
             else begin
               fx3_j_r <= fx3_j_r + 5'd1;
+              // same i, next j
+              fx3_base_addr_r <= {fx3_i_r, 6'b0} + fx3_mul1280(fx3_j_r + 5'd1);
             end
           end
           else begin
             fx3_k_r <= fx3_k_r + 6'd1;
+            // i/j unchanged - fx3_base_addr_r holds its value
           end
         end
         else if (fx3_clear_req_sent_r) begin
@@ -2546,14 +2597,26 @@ always @(posedge CLK) begin
             `OP_MULT         : begin
               e2c_waitcnt_val_r <= 0;
 
-              exe_result = exe_alt1_r ? exe_umult_out : exe_mult_out;
+              // Drive e2r_data_r from its own dedicated combinational
+              // signal (exe_mult_sel_result, declared once outside this
+              // case statement) instead of the shared `exe_result`
+              // variable used by ~15 other opcodes. Previously this branch
+              // wrote e2r_data_r directly from a value computed in the
+              // same state/statement, unlike every sibling opcode (which
+              // stages through e2r_data_pre_r one cycle earlier). That
+              // made XST factor/share LUTs between this mux and unrelated
+              // REG_r write-back logic (visible in the timing report as
+              // e2r_z_r_BRB4 / REG_r_1_2), adding the extra logic levels
+              // that pushed TS_CLK21 over budget (-0.432ns / -0.060ns).
+              // Routing it the same way as the rest of the register file
+              // removes that accidental sharing without adding a cycle.
 
               e2r_val_r      <= 1;
 
-              e2r_data_r     <= exe_result;
+              e2r_data_r     <= exe_mult_sel_result;
 
-              e2r_z_r        <= ~|exe_result;
-              e2r_s_r        <= exe_result[15];
+              e2r_z_r        <= ~|exe_mult_sel_result;
+              e2r_s_r        <= exe_mult_sel_result[15];
 
               EXE_STATE <= ST_EXE_WAIT;
 
