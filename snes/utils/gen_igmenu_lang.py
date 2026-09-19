@@ -33,23 +33,49 @@ import build_const as bc
 IGM_PREFIX = "text_igm_"
 IGM_WIDTH_MAX = 60
 
-# The HELP tab lines, IN RENDER ORDER. Lockstep with igm_help_rows / igm_help_cols in
-# snes/igmenu.a65 (SAME count + order) and with the EN base labels in snes/const.a65.
+# The HELP screen strings, IN INDEX ORDER. Lockstep with the IGM_HP_* indices in
+# snes/ighelp.i65 (SAME count + order) and with the EN base labels in snes/const.a65.
+# The shortcut lines are the ACTION only; the combo beside each one is rendered at run
+# time from the pad word (ig_combo_draw), never baked into a translated string.
 HELP_LABELS = [
-    "text_igm_hdr_controls",
-    "text_igm_open",
-    "text_igm_save",
-    "text_igm_load",
-    "text_igm_slot",
-    "text_igm_reset",
-    "text_igm_hdr_keys",
-    "text_igm_tab",
-    "text_igm_page",
-    "text_igm_nav",
-    "text_igm_act",
-    "text_igm_close",
-    "text_igm_note",
+    "text_igm_hdr_controls",  # 0  header (centered)
+    "text_igm_open",          # 1  action: open the in-game menu
+    "text_igm_save",          # 2  action: save state
+    "text_igm_load",          # 3  action: load state
+    "text_igm_slot",          # 4  action: choose slot
+    "text_igm_reset_game",    # 5  action: reset the game
+    "text_igm_reset",         # 6  action: reset to the menu
+    "text_igm_cheats_on",     # 7  action: cheats on
+    "text_igm_cheats_off",    # 8  action: cheats off
+    "text_igm_hooks_off",     # 9  action: disable the in-game hooks
+    "text_igm_hooks_10s",     # 10 action: disable them for 10 seconds
+    "text_igm_pergame",       # 11 footnote for a per-game savestate combo (centered)
+    "text_igm_hdr_keys",      # 12 header (centered)
+    "text_igm_keys1",         # 13 menu keys, line 1 (centered)
+    "text_igm_keys2",         # 14 menu keys, line 2 (centered)
+    "text_igm_unavail",       # 15 value-column text when savestates are off for this game
 ]
+
+# HELP geometry (ighelp.i65): action labels start at col 6 and the combo column at 32, so
+# an action may not exceed 24 columns; the "unavailable" text sits IN the combo column
+# (32..59). Headers and the centered lines only need to stay inside the frame interior.
+HELP_LABEL_MAX = {lbl: 24 for lbl in HELP_LABELS[1:11]}
+HELP_LABEL_MAX.update({
+    "text_igm_hdr_controls": 40, "text_igm_hdr_keys": 40,
+    "text_igm_pergame": 56, "text_igm_keys1": 56, "text_igm_keys2": 56,
+    "text_igm_unavail": 28,
+})
+
+# D-pad direction names printed INSIDE a rendered combo, IN PAD-BIT ORDER
+# ($0800 Up, $0400 Down, $0200 Left, $0100 Right). Lockstep with igc_tok_tbl in
+# snes/ighelp.i65. The other button names are neutral ASCII over there.
+KEYS_LABELS = [
+    "text_igm_key_up",
+    "text_igm_key_down",
+    "text_igm_key_left",
+    "text_igm_key_right",
+]
+KEYS_LABEL_MAX = {lbl: 8 for lbl in KEYS_LABELS}
 
 # The STATES tab (Phase 3) strings, IN INDEX ORDER. Lockstep with the IGM_ST_* indices
 # in snes/igmenu.a65 (SAME count + order) and with the EN base labels in const.a65.
@@ -58,13 +84,18 @@ STATES_LABELS = [
     "text_igm_st_slot",      # 1 slot word ("SLOT")
     "text_igm_st_full",      # 2 occupied
     "text_igm_st_empty",     # 3 empty
-    "text_igm_st_hint",      # 4 save/load hint
+    "text_igm_st_hint_save", # 4 hint word after the save combo ("<combo> save")
     "text_igm_st_disabled",  # 5 slots-disabled message
+    "text_igm_st_hint_load", # 6 hint word after the load combo
+    "text_igm_st_unavail",   # 7 savestates not available for this game (centered)
 ]
 
 # Column layout in igmenu.a65 draws the slot word at col 24 with the digit at ~col 31,
 # so the slot word must stay <= 8 columns; guard it here (build fails otherwise).
-STATES_LABEL_MAX = {"text_igm_st_slot": 8}
+# The hint line is COMPOSED at run time ("<save combo> <word>   <load combo> <word>"), so
+# the two words stay short enough for two four-button combos to share the row with them.
+STATES_LABEL_MAX = {"text_igm_st_slot": 8, "text_igm_st_hint_save": 12,
+                    "text_igm_st_hint_load": 12, "text_igm_st_unavail": 50}
 
 # Words per table row. MUST be a power of two and MUST match the number of `asl`
 # in the nine row-index sites of snes/igmenu.a65 (search IGM_LANG_SHIFT there).
@@ -107,7 +138,7 @@ SAVES_LABEL_MAX = {
     "text_igm_sv_slot": 8,   # slot word drawn at col 24 with the digit at ~col 31 (like STATES)
 }
 
-# The tab-bar labels, IN TAB ORDER (0=Cheats..4=Help). Lockstep with the tab dispatch
+# The tab-bar labels, IN TAB ORDER (0=Cheats..4=Trainer, 5=Help). Lockstep with the tab dispatch
 # order in snes/igmenu.a65 and with the EN base labels in const.a65.
 TAB_LABELS = [
     "text_igm_tab_cheats",   # 0 CHEATS
@@ -115,7 +146,7 @@ TAB_LABELS = [
     "text_igm_tab_saves",    # 2 SAVES
     "text_igm_tab_manual",   # 3 GUIDES
     "text_igm_tab_trainer",  # 4 TRAINER
-    "text_igm_tab_help",     # 5 HELP -- still off the bar (IGMENU_TABS = 5)
+    "text_igm_tab_help",     # 5 HELP -- off the bar (IGMENU_TABS = 5): SELECT opens it
 ]
 
 # The MANUAL tab (Phase 5) strings, IN INDEX ORDER. Lockstep with the IGM_MN_* indices in
@@ -166,6 +197,7 @@ SHELL_LABELS = [
     "text_igm_master_off",    # 4 master cheat switch, disabled
     "text_igm_ft_ce_edit",    # 5 footer, cheat editor (item list / confirm)
     "text_igm_ft_ce_kbd",     # 6 footer, cheat editor keyboard
+    "text_igm_ft_help",       # 7 footer, HELP screen
 ]
 
 # The cheat EDITOR (CHEATS tab: add / edit / delete a cheat), IN INDEX ORDER. Lockstep with
@@ -223,18 +255,20 @@ TRAINER_LABELS = [
     "text_igm_tr_setvalue",     # 24 action
     "text_igm_tr_freeze",       # 25 action
     "text_igm_tr_unfreeze",     # 26 action
-    "text_igm_tr_addcheat",     # 27 action
+    "text_igm_tr_savecheat",    # 27 action
     "text_igm_tr_frozen",       # 28 status token
     "text_igm_tr_searching",    # 29 message (centered)
     "text_igm_tr_noresults",    # 30 message (centered)
     "text_igm_tr_toomany",      # 31 message (centered)
-    "text_igm_tr_dropped_ss",   # 32 message (centered)
-    "text_igm_tr_dropped_rst",  # 33 message (centered)
-    "text_igm_tr_nofreeze",     # 34 message (centered)
-    "text_igm_tr_hint_setup",   # 35 footer hint (centered)
-    "text_igm_tr_hint_edit",    # 36 footer hint (centered)
-    "text_igm_tr_hint_list",    # 37 footer hint (centered)
-    "text_igm_tr_master_off",  # 38 warning: a freeze exists but the master switch is off
+    "text_igm_tr_dropped_rst",  # 32 message (centered)
+    "text_igm_tr_nofreeze",     # 33 message (centered)
+    "text_igm_tr_hint_setup",   # 34 footer hint (centered)
+    "text_igm_tr_hint_edit",    # 35 footer hint (centered)
+    "text_igm_tr_hint_list",    # 36 footer hint (centered)
+    "text_igm_tr_master_off",   # 37 warning: a freeze exists but the master switch is off
+    "text_igm_tr_saved",        # 38 SAVE CHEAT result (centered)
+    "text_igm_tr_savefail",     # 39 SAVE CHEAT result (centered)
+    "text_igm_tr_unpin",        # 40 action: take a set/frozen address off the results
 ]
 
 # The TRAINER body is a 36-column window (ig_frame_geom x=13 w=38 -> interior cols 14..49):
@@ -250,7 +284,7 @@ TRAINER_LABEL_MAX = {
     "text_igm_tr_gt": 14, "text_igm_tr_lt": 14,
     "text_igm_tr_newsearch": 22, "text_igm_tr_filter": 22, "text_igm_tr_results": 22,
     "text_igm_tr_reset": 22, "text_igm_tr_setvalue": 22, "text_igm_tr_freeze": 22,
-    "text_igm_tr_unfreeze": 22, "text_igm_tr_addcheat": 22,
+    "text_igm_tr_unfreeze": 22, "text_igm_tr_savecheat": 22, "text_igm_tr_unpin": 22,
     "text_igm_tr_address": 14, "text_igm_tr_current": 14, "text_igm_tr_frozen": 14,
 }
 TRAINER_MSG_MAX = 36   # centered lines inside the 36-column interior
@@ -264,6 +298,10 @@ def cap_for(label):
     """Per-label encoded-width cap (build fails if a translation exceeds it)."""
     if label in TAB_LABELS:
         return TAB_LABEL_MAX
+    if label in HELP_LABEL_MAX:
+        return HELP_LABEL_MAX[label]
+    if label in KEYS_LABEL_MAX:
+        return KEYS_LABEL_MAX[label]
     if label in SAVES_LABEL_MAX:
         return SAVES_LABEL_MAX[label]
     if label in CHEATS_LABEL_MAX:
@@ -315,8 +353,10 @@ def main():
             problems.append(f"{lbl}: missing from lang_{name}.py")
         for lbl in sorted(dl - const_labels):
             problems.append(f"{lbl}: in lang_{name}.py but not in {base.name}")
-    for lbl in (HELP_LABELS + STATES_LABELS + SAVES_LABELS + TAB_LABELS + MANUAL_LABELS
-                + CHEATS_LABELS + SHELL_LABELS + TRAINER_LABELS + CHEATEDIT_LABELS):
+    all_labels = (HELP_LABELS + KEYS_LABELS + STATES_LABELS + SAVES_LABELS + TAB_LABELS
+                  + MANUAL_LABELS + CHEATS_LABELS + SHELL_LABELS + TRAINER_LABELS
+                  + CHEATEDIT_LABELS)
+    for lbl in all_labels:
         if lbl not in en_args:
             problems.append(f"{lbl}: listed in a *_LABELS table but not in {base.name}")
     if problems:
@@ -337,8 +377,7 @@ def main():
 
     # --- width guard (overlay width, plus tighter per-label caps for column layout) ---
     wide = []
-    for lbl in (HELP_LABELS + STATES_LABELS + SAVES_LABELS + TAB_LABELS + MANUAL_LABELS
-                + CHEATS_LABELS + SHELL_LABELS + TRAINER_LABELS + CHEATEDIT_LABELS):
+    for lbl in all_labels:
         cap = cap_for(lbl)
         for lang in lang_order:
             n = encoded_len(args_for(lbl, lang))
@@ -395,6 +434,7 @@ def main():
         "// snescom preprocessing: use // comments, never ; inside an included file.",
         "",
         f"#define IGM_HELP_NLINES {len(HELP_LABELS)}",
+        f"#define IGM_KEYS_NLINES {len(KEYS_LABELS)}",
         f"#define IGM_STATES_NLINES {len(STATES_LABELS)}",
         f"#define IGM_SAVES_NLINES {len(SAVES_LABELS)}",
         f"#define IGM_TAB_NLINES {len(TAB_LABELS)}",
@@ -408,6 +448,7 @@ def main():
         "",
     ]
     out += emit_table("igm_help_tbl", "igm_s", HELP_LABELS)
+    out += emit_table("igm_keys_tbl", "igm_k", KEYS_LABELS)
     out += emit_table("igm_states_tbl", "igm_sts", STATES_LABELS)
     out += emit_table("igm_saves_tbl", "igm_sv", SAVES_LABELS)
     out += emit_table("igm_tab_tbl", "igm_tb", TAB_LABELS)
@@ -418,7 +459,8 @@ def main():
     out += emit_table("igm_cheatedit_tbl", "igm_ce", CHEATEDIT_LABELS)
 
     out_path.write_text("\n".join(out) + "\n")
-    print(f"generated {out_path}: HELP {len(HELP_LABELS)} + STATES {len(STATES_LABELS)} "
+    print(f"generated {out_path}: HELP {len(HELP_LABELS)} + KEYS {len(KEYS_LABELS)} "
+          f"+ STATES {len(STATES_LABELS)} "
           f"+ SAVES {len(SAVES_LABELS)} + TAB {len(TAB_LABELS)} + MANUAL {len(MANUAL_LABELS)} "
           f"+ CHEATS {len(CHEATS_LABELS)} + TRAINER {len(TRAINER_LABELS)} "
           f"lines x {nlang} langs ({', '.join(lang_order)})")
