@@ -19,8 +19,8 @@ MK3MENU := m3nu.bin
 FPGAPATH := verilog
 MK2EXT := bit
 MK3EXT := bi3
-MK2CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb sgb_msu
-MK3CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb
+MK2CORES := #base cx4 gsu obc1 sdd1 sa1 dsp sgb sgb_msu
+MK3CORES := base st0011 st0018 #MK3CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb
 
 MK2FPGA := $(foreach C,$(MK2CORES),$(FPGAPATH)/sd2snes_$C/fpga_$C.$(MK2EXT))
 MK3FPGA := $(foreach C,$(MK3CORES),$(FPGAPATH)/sd2snes_$C/fpga_$C.$(MK3EXT))
@@ -116,8 +116,19 @@ mk3: version $(MK3FPGA) $(MK3MINI) bsxpage mk3-fw
 	cd $(TARGETPARENT) && zip -r sd2snes_firmware_v$(CONFIG_VERSION).zip sd2snes
 
 mk3-fw: $(MK3MINI)
+	rm -rf $(TARGETPARENT)
+	mkdir -p $(TARGET)
 	$(MAKE) -C snes
 	$(MAKE) -C src CONFIG=config-mk3
 	$(MAKE) -C src CONFIG=config-mk3-stm32
+	cp $(MK3MCUPATH)/$(MK3MCU) $(TARGET)
+	cp $(STMMCUPATH)/$(STMMCU) $(TARGET)
+
+mk2-fw:
+	rm -rf $(TARGETPARENT)
+	mkdir -p $(TARGET)
+	$(MAKE) -C snes
+	$(MAKE) -C src CONFIG=config-mk2
+	cp $(MK2MCUPATH)/$(MK2MCU) $(TARGET)
 
 .PHONY: version release bsxpage mk3 mk3-fw $(MK2FPGA) $(MK3FPGA) $(MK2MINI) $(MK3MINI) $(MK2CLEAN) $(MK3CLEAN)

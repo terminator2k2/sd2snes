@@ -68,6 +68,14 @@ extern uint8_t fpga_boot_led;
 #define FPGA_A26 ((const uint8_t*)"/sd2snes/fpga_a26." FPGA_CONF_EXT)
 #define FPGA_BASE ((const uint8_t*)"/sd2snes/fpga_base." FPGA_CONF_EXT)
 #define FPGA_DSP ((const uint8_t*)"/sd2snes/fpga_dsp." FPGA_CONF_EXT)
+/* Dedicated ST010/ST011 core (verilog/sd2snes_st0011). Separate from
+   fpga_dsp because the uPD96050's 16384-word program needs a block-RAM
+   fetch cache that does not coexist with MSU-1 and the DSP1-4 on-chip
+   program ROM -- on the mk2 XC3S400 the shared core has zero BRAMs spare.
+   Dropping both is what makes it fit, so it cannot be folded back into
+   fpga_dsp. Exists for both mk2 (.bit) and mk3 (.bi3). */
+#define FPGA_ST0011 ((const uint8_t*)"/sd2snes/fpga_st0011." FPGA_CONF_EXT)
+#define FPGA_ST0018 ((const uint8_t*)"/sd2snes/fpga_st0018." FPGA_CONF_EXT)
 /* mk2: boot-display bootstrap config ("fpga_mini"), loaded from SD instead of
    baked into the firmware to reclaim ~21 KB of the tight 128 KB flash. See
    fpga_rompgm(). mk3/mk3-stm32 keep it embedded (cfgware). */
