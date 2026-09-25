@@ -102,7 +102,13 @@ The SoC is held in reset while the SNES is in reset (`SNES_DEADr`, like the cart
   - `xc_run(1)` releases the soft CPU just before the SNES leaves reset.
 - **Main loop** (`main.c`): `xc_audio_poll()` provides the Opus decode service (`xc_audio.c`) and a halt report on the UART.
 - **Opus library:** `xc_opus/build.sh <opus-1.3.1 source>` builds `libopus_xc.a`. The settings are exact (see the script). **Built with the sd2snes MCU flags and run on a Cortex-M4 instruction-level model, it decodes all 480,000 samples bit-exact** (checksum `0xdb88f8e0`, the same as the host decoder that matches the firmware).
-- **Size:** `firmware.stm` is 176,104 bytes without the embedded mini bitstream. The limit is 212,480 bytes, which leaves 36 KB for the mini bitstream. `OPT=-Os` for the Opus library frees about 10 KB more.
+- **Size, with the real mini bitstream** (`fpga_mini.bi3`, 56,939 bytes, embedded by the build):
+  - **`firmware.stm` is 208,300 bytes: a 207,788-byte image plus the 512-byte header, against 212,480 + 512.** That leaves 4,692 bytes free.
+  - Two changes were needed to fit:
+    - **`stm32f401.ld`:** the `.ahbram` buffers (8 KB sort buffer, MSU-1) became `NOLOAD`. On the STM32 nothing initializes them from flash, but their 8,992 zero bytes were stored in the image. The RAM layout is unchanged. Stock 1.11.2 shrinks by the same 8,992 bytes (153,936 → 144,944).
+    - **`xc_opus/build.sh`:** `-Os`, and `SMALL_FOOTPRINT` for `cwrs.c` only (computes the PVQ codeword counts instead of a 5 KB table). Still bit-exact: checksum `0xdb88f8e0` on the host and on the Cortex-M4 model.
+  - The linker script also gained an `ASSERT`: before, the `.data` and `.ahbram` load bytes were not checked against the flash region, so an oversized firmware linked without an error. With `-O2` Opus the image would have been about 20 KB too large; now that fails to link.
+- **MCU time for the Opus decoder:** about 33 M cycles/s (39% of 84 MHz, instruction-level Cortex-M4 model, before flash wait states). That is +27% over `-O2` with the table (26.0 M); −Os accounts for 18% and the computed `cwrs` for 8%.
 
 FPGA commands (`mcu_cmd.v`):
 
@@ -143,7 +149,7 @@ Leaving these out saves about 2,600 LEs and 20 M9K blocks. The first two can be 
 | …the checks are sharp | Bugs the RTL-in-the-loop run found while bringing the SoC up | The exception number was off by 16; the reset vector was taken one cycle too early; `TX_ADDR` never reached the window; the clean loop compared tags one cycle before they were read (the DMA checker caught the stale data). |
 | **Timing changes** (see "Timing") | `xc_m0`: random-program ISA lockstep, 2 × 3,000 programs; and the full-firmware lockstep in SoC mode (`runner_cosim`, 300 frames). `xc_brr`: `tb_brr` (40,000 game blocks + 1,000,000 random). `xc_window`: `tb_xc_window` 600-frame replay. Whole game on the RTL, 3,600 frames, against the original RTL run with the same harness. | **ISA: 2.83 M instructions, 52,208 interrupt entries, 0 mismatches. Firmware: 388,116,519 instructions, 5,067 interrupt entries, 0 mismatches. BRR: 0 mismatches (180 cycles/block). Window: 0 errors, 0 underruns.** Whole game: 371,879,820 core reads / 38,291,537 writes and 3,336,551 DMA bytes, 0 mismatches. Game ticks 60.55/s vs 60.59/s. Frame message → stream post p50/p95/p99/max: 7.61/11.51/14.86/37.48 ms vs 7.56/11.47/15.20/37.31 ms. Audio correlation with the original RTL: median 0.9992, lag 0. Screenshots are identical to the original RTL through frame 1,680 (well into gameplay). After that, small timing differences change positions, and the game plays normally. (A rerun of the *original* RTL also differs from its first run from frame 1,620, so screenshots in gameplay aren't a sharp test; the checkers and latency are.) |
 | Image builder | The RTL runs from the file `xc_build_image.py` produced (`XC_RTL_IMAGE`) | Same results and screenshots as the RTL's own layout |
-| MCU firmware | `make CONFIG=config-mk3-stm32` with the changes and the Opus library | Builds and links: 176,104 bytes |
+| MCU firmware | `make CONFIG=config-mk3-stm32` with the changes, the Opus library (`-Os`, small-footprint `cwrs.c`) and the real `fpga_mini.bi3` (56,939 bytes) | **Builds and links: `firmware.stm` 208,300 bytes (limit 212,992 with header).** The embedded bitstream is byte-identical to the file. With `-O2` Opus the link stops with "firmware image does not fit in flash". Opus decoder output: checksum `0xdb88f8e0`, as before (host and Cortex-M4 model). |
 | Core elaboration | iverilog, `-DMK3`, the whole `sd2snes_xc` (Altera IP replaced by behavioural models) | Clean |
 
 The "reads found the ring empty" statistic was 68 in 60 s. Each one is a SNES read that came within about 250 ns of a post, before the first byte arrived. The kernel is polling at those moments, as it does on the cartridge, where the RP2040's DMA also takes time.
@@ -213,7 +219,4 @@ What's left on `clk_soc` is the register read → adder → next bus address →
    - Check that `SNES_DEADr` behaves as the SoC reset expects during the MCU's reset sequence.
    - Watch the UART for the halt report.
    - Check the saves: the `.srm` appears after the first save.
-3. **The mini bitstream (MCU flash).**
-   - The MCU application area is 212,480 bytes (`stm32f401.ld`). The firmware with Xeno Crisis support is 176,094 bytes of code and data without the embedded mini bitstream; stock 1.11.2 is 96,992 bytes, measured the same way.
-   - That leaves **36,386 bytes for `fpga_mini.bi3`**, about 46 KB with `OPT=-Os` for the Opus library.
-   - The mini bitstream is Quartus output, and its size isn't published or in the repository, so this can only be settled with Quartus. The linker enforces the limit: an image that doesn't fit fails to link rather than producing a broken firmware.
+3. **MCU on hardware.** The flash budget is settled with the real mini bitstream (4,692 bytes free, see "MCU"). Measure the decoder's real time on the STM32F401 (modelled: 39% of 84 MHz before flash wait states).
