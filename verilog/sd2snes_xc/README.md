@@ -141,6 +141,7 @@ Leaving these out saves about 2,600 LEs and 20 M9K blocks. The first two can be 
 | Divider | Verilator, 2,000,000 random and edge-case divisions, signed and unsigned | 0 wrong |
 | **Whole game on the RTL** | `runner_rtl` (`XC_RTL=1`): MesenCE runs the SNES and the Verilated `xc_top` replaces the RP2040. It has models of the PSRAM (free-slot wait), the SRAM chip, the SNES window strobes and the MCU decode service. Two checkers run the whole time: every core read of RAM, flash, bootrom or save is compared with a flat reference memory, and every byte the window DMA reads is compared with what the core wrote. 3,600 frames (60 s): boot, title, menus, gameplay. | **394,022,873 core reads and 38,292,028 writes, 0 mismatches; 3,334,741 DMA bytes, 0 mismatches.** 7,073 descriptors, 2,786 decode jobs, 3.33 MB streamed. Screenshots are identical to MesenCE SoC mode up to frame 150. After that, gameplay timing differs (40 MHz soft CPU vs the emulated 133 MHz RP2040, as with the sizing model), and the game plays normally (see the montage). Music correlates at 1.000 with SoC mode, shifted by 16–24 ms. |
 | …the checks are sharp | Bugs the RTL-in-the-loop run found while bringing the SoC up | The exception number was off by 16; the reset vector was taken one cycle too early; `TX_ADDR` never reached the window; the clean loop compared tags one cycle before they were read (the DMA checker caught the stale data). |
+| **Timing changes** (see "Timing") | `xc_m0`: random-program ISA lockstep, 2 × 3,000 programs; and the full-firmware lockstep in SoC mode (`runner_cosim`, 300 frames). `xc_brr`: `tb_brr` (40,000 game blocks + 1,000,000 random). `xc_window`: `tb_xc_window` 600-frame replay. Whole game on the RTL, 3,600 frames, against the original RTL run with the same harness. | **ISA: 2.83 M instructions, 52,208 interrupt entries, 0 mismatches. Firmware: 388,116,519 instructions, 5,067 interrupt entries, 0 mismatches. BRR: 0 mismatches (180 cycles/block). Window: 0 errors, 0 underruns.** Whole game: 371,879,820 core reads / 38,291,537 writes and 3,336,551 DMA bytes, 0 mismatches. Game ticks 60.55/s vs 60.59/s. Frame message → stream post p50/p95/p99/max: 7.61/11.51/14.86/37.48 ms vs 7.56/11.47/15.20/37.31 ms. Audio correlation with the original RTL: median 0.9992, lag 0. Screenshots are identical to the original RTL through frame 1,680 (well into gameplay). After that, small timing differences change positions, and the game plays normally. (A rerun of the *original* RTL also differs from its first run from frame 1,620, so screenshots in gameplay aren't a sharp test; the checkers and latency are.) |
 | Image builder | The RTL runs from the file `xc_build_image.py` produced (`XC_RTL_IMAGE`) | Same results and screenshots as the RTL's own layout |
 | MCU firmware | `make CONFIG=config-mk3-stm32` with the changes and the Opus library | Builds and links: 176,104 bytes |
 | Core elaboration | iverilog, `-DMK3`, the whole `sd2snes_xc` (Altera IP replaced by behavioural models) | Clean |
@@ -167,15 +168,52 @@ Quartus isn't available here. Yosys (`synth_intel`, Cyclone IV E) numbers for `x
 - **Base:** the sd2snes base without MSU/DAC/cheats is about 1,400 LUTs.
 - **Total:** about **12,500 of 15,408 LEs (≈81%)**, **34 of 56 M9K**, 5 of 56 multipliers.
 
-This should fit, but the C8 speed grade at 81% makes 40 MHz for the soft CPU the open question.
+This should fit. Timing is covered in the next section.
+
+## Timing (estimate, and the changes it led to)
+
+Quartus isn't available here, so timing was estimated with a small static-timing script (`fpga/timing/sta.py`) on the Yosys netlist:
+- **Netlist:** the design is mapped to 4-input LUTs, with adders, multipliers and block RAMs kept as whole cells.
+- **Delays** (rough Cyclone IV C8 figures): 1 ns per LUT level including routing; 0.1 ns per carry bit; 3 ns M9K clock-to-out; 4.5 ns for an 18×18 multiplier and 7.5 ns for 32×32.
+- **Paths:** the worst register-to-register path in each clock domain. Asynchronous-read memories count as logic, and clock-domain crossings are ignored (they go through synchronizers).
+
+**Calibration.** The same script rates the shipping mk3 SA-1 and GSU cores at 15.8 and 14.1 ns. Both are constrained, and run, at 85.9 MHz (11.65 ns) with no multicycle exceptions. So the script overestimates by a factor of **1.21–1.36**, and the "real" columns below divide by that range.
+
+| Clock domain | Needed | Before | After | After, real (÷1.36 … ÷1.21) |
+|---|---|---|---|---|
+| `clk_soc` (soft CPU, 40 MHz) | 25.0 ns | 45.4 | **25.7** | **18.9–21.2 ns** (≈47–53 MHz) |
+| `clk2` (window, bridge, mailbox; 85.9 MHz) | 11.65 ns | 13.4 | **12.7** | **9.3–10.5 ns** |
+
+**Before: 40 MHz would not have closed, and neither would the 32 MHz fallback.** The original design came out at 33–37 ns, which is 27–30 MHz. The worst path ran through everything in one cycle:
+1. D-cache tag RAM, hit compare and read-data mux;
+2. the core decoding the arriving instruction word and reading the register file;
+3. the 32×32 multiplier;
+4. write-back.
+
+A second path of the same length went from the adder, through the next bus address, back into the cache's address register.
+
+**Changes** (all verified as described below):
+- **`xc_m0`, decode only from the fetch buffer.** A fetched word is latched and executed the next cycle; a new state `S_X32` handles 32-bit instructions. This takes the cache hit path out of decode/execute. The 30-bit `pc+2` buffer compare became `hit & ~pc[1]`.
+- **`xc_m0`, early fetch.** When an instruction finishes and its successor's word isn't in the buffer, the fetch is issued in that same cycle, for sequential code, taken branches, BX and 32-bit instructions. The target never depends on bus data, and this is off in step mode. It hides the latch cycle: game timing is unchanged (below).
+- **`xc_m0`, two-cycle MUL.** The product is registered, which lets Quartus use the DSP output register. MUL is 0.08% of the instructions executed.
+- **`xc_m0`, cache data kept out of the ALU.** Register selects in LDM/STM, POP and exception stacking no longer depend on `bus_ready`. Exception return's SP adjustment has its own adder. The ALU sum enters the next-bus-address mux last. All of these were false paths functionally, but Quartus would have timed them.
+- **`xc_brr`, a third pipeline stage.** The variable shift and clamp now come before the squares. It is still bit-exact; a block takes 180 cycles instead of 179.
+- **`xc_window`, registered `ring_room`.** It uses 3 bytes of headroom instead of 2, which takes two subtractions and a compare out of the DMA decision on `clk2`.
+
+**Area:** 244 fewer LUTs and 62 more flip-flops (same Yosys flow, before vs after).
+
+What's left on `clk_soc` is the register read → adder → next bus address → cache key path. On `clk2` it is the `TX_PENDING` sum. **40 MHz should now close with about 15–25% margin.** Quartus has the last word. If it doesn't close, `SOC_MHZ` 32 with PLL multiply 4 is now a comfortable fallback.
 
 ## Not done yet
 
 1. **Quartus fit and timing.**
-   - If 40 MHz doesn't close, set the PLL `clk1_multiply_by` to 4 and `SOC_MHZ` to 32. The sizing model puts 32 MHz at about the same frame rate, with slightly higher latency peaks.
-   - The likely critical paths are the core's fetch → decode → execute path, and the cache-hit path: RAM → tag compare → `bus_ready` → next address → RAM.
+   - The estimate above says both domains close, `clk_soc` with 15–25% margin. Check `clk_soc` at 40 MHz and `clk2` at 85.9 MHz in the Quartus timing report.
+   - The fallback is still `clk1_multiply_by` 4 with `SOC_MHZ` 32.
 2. **First hardware run.**
    - Check that `SNES_DEADr` behaves as the SoC reset expects during the MCU's reset sequence.
    - Watch the UART for the halt report.
    - Check the saves: the `.srm` appears after the first save.
-3. **The mini bitstream:** it needs to fit in the 36 KB left in the MCU flash.
+3. **The mini bitstream (MCU flash).**
+   - The MCU application area is 212,480 bytes (`stm32f401.ld`). The firmware with Xeno Crisis support is 176,094 bytes of code and data without the embedded mini bitstream; stock 1.11.2 is 96,992 bytes, measured the same way.
+   - That leaves **36,386 bytes for `fpga_mini.bi3`**, about 46 KB with `OPT=-Os` for the Opus library.
+   - The mini bitstream is Quartus output, and its size isn't published or in the repository, so this can only be settled with Quartus. The linker enforces the limit: an image that doesn't fit fails to link rather than producing a broken firmware.

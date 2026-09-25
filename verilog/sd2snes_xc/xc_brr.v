@@ -10,7 +10,9 @@
 //   - a shift only wins when its (signed) error is strictly smaller than the best so far (first wins ties);
 //   - the header is shift << 4 | 0x02 (loop flag), filter 0, no END flag (the mixer sets END itself).
 //
-// Timing: two-stage pipeline, one sample per clock: 11 shifts x 16 samples = 176 clocks + 2 per block.
+// Timing: three-stage pipeline, one sample per clock: 11 shifts x 16 samples = 176 clocks + 3 per block.
+//   stage 0: candidate nibbles (variable shift, clamp); stage 1: reconstruction error and squares;
+//   stage 2: accumulate and pick the shift. (The squares were in stage 0 before; split for 40 MHz.)
 //
 // Soft-core register interface (word registers, byte address offsets):
 //   0x00-0x3C  SAMPLE[i]  (write) sample i, low 16 bits used
@@ -39,6 +41,14 @@ reg [3:0] sh;                    // shift of the item entering stage 1 (12..2)
 reg [3:0] idx;                   // sample index entering stage 1
 reg [71:0] out_block;            // result: byte 0 in bits 7:0
 
+// stage 0 -> stage 1 registers
+reg v0;
+reg [3:0] sh0, idx0;
+reg last0;
+reg signed [14:0] r70;
+reg [2:0] p0;
+reg signed [4:0] n0;
+
 // stage 1 -> stage 2 registers
 reg v1;
 reg [3:0] sh1, idx1;
@@ -58,7 +68,7 @@ reg finishing;
 
 
 //------------------------------------------------------------------------------
-// Stage 1: candidate nibbles and squared errors for sample idx at shift sh
+// Stage 0: candidate nibbles for sample idx at shift sh
 //------------------------------------------------------------------------------
 wire signed [15:0] cur = s[idx];
 wire signed [14:0] r7 = cur[15:1];                        // s >> 1 (arithmetic)
@@ -71,11 +81,14 @@ wire [2:0] p = (pshift > 17'd7) ? 3'd7 : pshift[2:0];
 wire signed [17:0] nsum = $signed({2'b00, pu}) - 18'sd65536 + $signed({6'd0, half});
 wire signed [17:0] nshift = nsum >>> sh;
 wire signed [4:0] n = (nshift < -18'sd8) ? -5'sd8 : (nshift > 18'sd7) ? 5'sd7 : nshift[4:0];
+//------------------------------------------------------------------------------
+// Stage 1: reconstruction errors and their squares (from the stage 0 registers)
+//------------------------------------------------------------------------------
 // reconstructions: (int16)((u32)x << sh & ~1) >> 1 == x << (sh - 1) for these ranges
-wire signed [16:0] recp = $signed({14'd0, p}) <<< (sh - 4'd1);
-wire signed [16:0] recn = $signed({{12{n[4]}}, n}) <<< (sh - 4'd1);
-wire signed [16:0] ep = $signed({{2{r7[14]}}, r7}) - recp;
-wire signed [16:0] en = $signed({{2{r7[14]}}, r7}) - recn;
+wire signed [16:0] recp = $signed({14'd0, p0}) <<< (sh0 - 4'd1);
+wire signed [16:0] recn = $signed({{12{n0[4]}}, n0}) <<< (sh0 - 4'd1);
+wire signed [16:0] ep = $signed({{2{r70[14]}}, r70}) - recp;
+wire signed [16:0] en = $signed({{2{r70[14]}}, r70}) - recn;
 wire signed [33:0] sqp_full = ep * ep;
 wire signed [33:0] sqn_full = en * en;
 
@@ -87,11 +100,12 @@ wire [31:0] err_next = err + (take_p ? {1'b0, sqp1} : {1'b0, sqn1});
 wire [3:0] nib_now = take_p ? {1'b0, p1} : nn1;
 wire [63:0] nibs_next = {nibs[59:0], nib_now};   // sample 0 ends up in bits 63:60
 
-assign busy = running | v1 | finishing;
+assign busy = running | v0 | v1 | finishing;
 
 always @(posedge clk) begin
   if(rst) begin
     running <= 1'b0;
+    v0 <= 1'b0;
     v1 <= 1'b0;
     finishing <= 1'b0;
     out_block <= 72'd0;
@@ -111,17 +125,24 @@ always @(posedge clk) begin
       end
     end
 
-    // stage 1
-    v1 <= running;
+    // stage 0
+    v0 <= running;
     if(running) begin
-      sh1 <= sh; idx1 <= idx; last1 <= (idx == 4'd15);
-      sqp1 <= sqp_full[30:0]; sqn1 <= sqn_full[30:0];
-      p1 <= p; nn1 <= n[3:0];
+      sh0 <= sh; idx0 <= idx; last0 <= (idx == 4'd15);
+      r70 <= r7; p0 <= p; n0 <= n;
       idx <= idx + 4'd1;
       if(idx == 4'd15) begin
         if(sh == 4'd2) running <= 1'b0;
         sh <= sh - 4'd1;
       end
+    end
+
+    // stage 1
+    v1 <= v0;
+    if(v0) begin
+      sh1 <= sh0; idx1 <= idx0; last1 <= last0;
+      sqp1 <= sqp_full[30:0]; sqn1 <= sqn_full[30:0];
+      p1 <= p0; nn1 <= n0[3:0];
     end
 
     // stage 2

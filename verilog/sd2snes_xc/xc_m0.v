@@ -12,6 +12,11 @@
 // computes load/store and branch addresses. Every cycle is described by one combinational
 // "micro-op" block; the sequential block only applies what it decided.
 //
+// Timing (40 MHz on Cyclone IV C8): instructions are decoded only from the fetch buffer register (a fetched word
+// is latched and executed the next cycle), the next fetch is issued in the cycle an instruction finishes
+// (EARLY_FETCH, off in step mode), MUL takes two cycles (registered product), and nothing that depends on
+// bus_ready/bus_rdata feeds the main ALU, whose sum drives bus_next_addr.
+//
 // Bus: one access at a time, held until bus_ready (which may be combinational for zero wait states).
 //   bus_size 0/1/2 = byte/halfword/word. bus_wdata holds the value in its low bits; bus_rdata must
 //   return the addressed value in its low bits (the bus adapter handles byte lanes). Instruction
@@ -25,7 +30,8 @@
 //   dbg_*       read/write registers while stopped (lockstep harness).
 //////////////////////////////////////////////////////////////////////////////////
 module xc_m0 #(
-  parameter DEBUG = 1            // debug read port and cycle/instruction counters (lockstep harness only)
+  parameter DEBUG = 1,           // debug read port and cycle/instruction counters (lockstep harness only)
+  parameter EARLY_FETCH = 1      // issue the next fetch in the cycle an instruction finishes (not in step mode)
 ) (
   input clk,
   input rst,
@@ -86,26 +92,28 @@ localparam S_IDLE   = 4'd0,
            S_EXC    = 4'd7,
            S_VEC    = 4'd8,
            S_ERET   = 4'd9,
-           S_HALT   = 4'd10;
+           S_HALT   = 4'd10,
+           S_X32    = 4'd11,     // execute a 32-bit instruction whose second halfword was just fetched
+           S_MULW   = 4'd12;     // MUL second cycle: write the registered product
 
 reg [3:0] state;
 
-// fetch buffer (last fetched word); the word arriving in S_FETCH/S_FETCH2 is decoded the same cycle
+// fetch buffer (last fetched word). Instructions are decoded only from this register: the word arriving
+// in S_FETCH/S_FETCH2 is latched and executed the next cycle, which keeps the cache hit path
+// (tag RAM -> compare -> data) out of the decode/execute path. The early fetch (EARLY_FETCH) hides the
+// extra cycle for sequential code and branches.
 reg [31:0] ibuf;
 reg [29:0] ibuf_addr;
 reg ibuf_valid;
-reg [15:0] ir1;                 // first halfword of a 32-bit instruction (S_FETCH2)
+reg [15:0] ir1;                 // first halfword of a 32-bit instruction (S_FETCH2 / S_X32)
 
 wire [31:0] pc2 = pc + 32'd2;
 wire [31:0] pc4 = pc + 32'd4;
 wire fetch_now = bus_ready && (state == S_FETCH || state == S_FETCH2);
-wire [31:0] ib = fetch_now ? bus_rdata : ibuf;
-wire [29:0] ib_addr = fetch_now ? (state == S_FETCH ? pc[31:2] : pc2[31:2]) : ibuf_addr;
-wire ib_valid = fetch_now | ibuf_valid;
-wire [15:0] op = pc[1] ? ib[31:16] : ib[15:0];
-wire ibuf_hit = ib_valid && (ib_addr == pc[31:2]);
-wire ibuf_hit2 = ib_valid && (ib_addr == pc2[31:2]);
-wire [15:0] op2 = pc2[1] ? ib[31:16] : ib[15:0];
+wire [15:0] op = pc[1] ? ibuf[31:16] : ibuf[15:0];
+wire ibuf_hit = ibuf_valid && (ibuf_addr == pc[31:2]);
+wire ibuf_hit2 = ibuf_hit && !pc[1];                 // both halfwords of a 32-bit instruction in the buffer
+wire [15:0] op2 = pc[1] ? ibuf[15:0] : ibuf[31:16];  // halfword at pc + 2 (S_X32: first half of the new word)
 
 // multi-register / memory / exception operation registers
 reg [31:0] m_addr;
@@ -122,7 +130,8 @@ reg [31:0] ex_sp;
 reg [31:0] ex_xpsr;
 reg [5:0] ex_num;
 
-wire go = !step_mode || step_go;
+reg step_armed;                 // step mode: a step was requested and has not finished yet
+wire go = !step_mode || step_go || step_armed;
 wire dbg_now = (state == S_IDLE) && dbg_we;
 wire take_exc = exc_req && (step_mode || (!primask && ipsr == 6'd0));
 wire [31:0] xpsr = {flag_n, flag_z, flag_c, flag_v, 3'b000, 1'b1, 18'd0, ipsr};
@@ -230,7 +239,9 @@ always @* begin
   end
 end
 
-wire [31:0] mul_res = rdA * rdB;
+// MUL takes two cycles: the product of the first cycle's operands is registered (DSP output register)
+reg [31:0] mul_q;
+always @(posedge clk) mul_q <= rdA * rdB;
 
 reg [31:0] alu_res;
 always @* begin
@@ -245,7 +256,7 @@ always @* begin
     default: begin
       case(misc_op)
         4'd0: alu_res = ~rdB;
-        4'd1: alu_res = mul_res;
+        4'd1: alu_res = mul_q;
         4'd2: alu_res = {{16{rdB[15]}}, rdB[15:0]};
         4'd3: alu_res = {{24{rdB[7]}}, rdB[7:0]};
         4'd4: alu_res = {16'd0, rdB[15:0]};
@@ -294,6 +305,10 @@ reg eret_start;
 reg exc_start;
 reg ipsr_clear, ipsr_set;
 reg is_sleep;
+reg mul_start;
+reg early;                      // early fetch issued this cycle
+reg iss_sum;                    // the issued address is the ALU sum (selected last: keeps the adder near the bus address)
+reg [2:0] iss_sum_clr;          // low address bits to clear in the sum (alignment)
 
 // 16-bit instruction fields
 wire [2:0] f_rd = op[2:0];
@@ -321,7 +336,7 @@ always @* begin
   sysm = 8'd0;
   primask_en = 1'b0; primask_val = 1'b0;
   ibuf_inval = 1'b0;
-  h1 = (state == S_FETCH2) ? ir1 : op;
+  h1 = (state == S_X32) ? ir1 : op;
   ml_rest = ml_list & ~(9'd1 << ((ml_idx == 4'd14) ? 4'd8 : ml_idx));
   mem_ld = 1'b0; m_we_d = 1'b0; m_sgn_d = 1'b0; m_size_d = 2'd2; m_rt_d = 4'd0;
   multi_start = 1'b0; ml_list_d = 9'd0; ml_load_d = 1'b0; ml_pop_d = 1'b0; ml_wb_d = 1'b0;
@@ -329,9 +344,12 @@ always @* begin
   exc_start = 1'b0;
   ipsr_clear = 1'b0; ipsr_set = 1'b0;
   is_sleep = 1'b0;
+  mul_start = 1'b0;
+  early = 1'b0;
+  iss_sum = 1'b0; iss_sum_clr = 3'b000;
 
-  exec16_now = ((state == S_IDLE) && go && !dbg_we && !take_exc && ibuf_hit) || ((state == S_FETCH) && bus_ready);
-  exec32_now = (exec16_now && op[15:11] >= 5'h1D && ibuf_hit2) || ((state == S_FETCH2) && bus_ready);
+  exec16_now = (state == S_IDLE) && go && !dbg_we && !take_exc && ibuf_hit;
+  exec32_now = (exec16_now && op[15:13] == 3'b111 && op[12:11] != 2'b00 && ibuf_hit2) || (state == S_X32); // op[15:11] >= 0x1D
 
   if(exec32_now) begin
     //---------------------------------------------------------------- 32-bit instructions
@@ -405,7 +423,7 @@ always @* begin
             4'hA: begin binv = 1'b1; cin_sel = 2'd1; w_en = 1'b0; fl_c = 1'b1; fl_v = 1'b1; end    // CMP
             4'hB: begin w_en = 1'b0; fl_c = 1'b1; fl_v = 1'b1; end                                 // CMN
             4'hC: aop = OP_ORR;
-            4'hD: begin aop = OP_MISC; misc_op = 4'd1; end                                       // MUL
+            4'hD: begin w_en = 1'b0; fl_src = FL_NONE; pc_en = 1'b0; done = 1'b0; mul_start = 1'b1; end // MUL (2 cycles)
             4'hE: aop = OP_BIC;
             default: begin aop = OP_MISC; misc_op = 4'd0; end                                    // MVN
           endcase
@@ -494,7 +512,7 @@ always @* begin
             else begin
               w_en = 1'b1; w_idx = 4'd13;
               rb = first9(op[8:0]);
-              iss = 1'b1; iss_we = 1'b1; iss_addr = sum[31:0];
+              iss = 1'b1; iss_we = 1'b1; iss_sum = 1'b1;
               multi_start = 1'b1; ml_list_d = op[8:0];
             end
           end
@@ -559,7 +577,8 @@ always @* begin
       pc_en = 1'b0; done = 1'b0;
       if(m_we_d && op[15:12] == 4'h5) nstate = S_STRREG;
       else begin
-        iss = 1'b1; iss_we = m_we_d; iss_size = m_size_d; iss_addr = align(sum[31:0], m_size_d);
+        iss = 1'b1; iss_we = m_we_d; iss_size = m_size_d;
+        iss_sum = 1'b1; iss_sum_clr = (m_size_d == 2'd2) ? 3'b011 : (m_size_d == 2'd1) ? 3'b001 : 3'b000;
         nstate = S_MEM;
       end
     end
@@ -572,13 +591,21 @@ always @* begin
             // exception entry: frame at (SP - 32) & ~7, first word (R0) written now
             ra = 4'd13; rb = 4'd0; bimm_en = 1'b1; bimm = 32'h20; binv = 1'b1; cin_sel = 2'd1;
             exc_start = 1'b1;
-            iss = 1'b1; iss_we = 1'b1; iss_addr = {sum[31:3], 3'b000};
+            iss = 1'b1; iss_we = 1'b1; iss_sum = 1'b1; iss_sum_clr = 3'b111;
             nstate = S_EXC;
           end else begin
             iss = 1'b1; iss_fetch = 1'b1; iss_addr = {pc[31:2], 2'b00};
             nstate = S_FETCH;
           end
         end
+      end
+      S_FETCH: if(bus_ready) nstate = S_IDLE;   // word latched into the buffer, executed next cycle
+      S_FETCH2: if(bus_ready) nstate = S_X32;
+      S_MULW: begin
+        ra = {1'b0, ir1[2:0]}; aop = OP_MISC; misc_op = 4'd1;
+        w_en = 1'b1; w_idx = {1'b0, ir1[2:0]};
+        fl_src = FL_ALU; fl_nz = 1'b1;
+        pc_en = 1'b1; pc_src = PC_2; done = 1'b1;
       end
       S_MEM: begin
         if(bus_ready) begin
@@ -594,11 +621,11 @@ always @* begin
         nstate = S_MEM;
       end
       S_MULTI: begin
+        rb = first9(ml_rest);   // next register to store (selected independently of bus_ready: keeps the cache hit out of the register-read path)
         if(bus_ready) begin
           if(ml_load) begin w_en = 1'b1; w_idx = ml_idx; w_src = W_BUS; end
           else if(bus_addr[31:2] == ibuf_addr) ibuf_inval = 1'b1;
           if(ml_rest != 9'd0) begin
-            rb = first9(ml_rest);
             iss = 1'b1; iss_we = ~ml_load; iss_addr = bus_addr + 32'd4;
           end else if(ml_pop) begin
             iss = 1'b1; iss_addr = bus_addr + 32'd4;
@@ -611,14 +638,21 @@ always @* begin
         end
       end
       S_POPPC: begin
+        ra = 4'd13;
         if(bus_ready) begin
-          ra = 4'd13;
           if(ipsr != 6'd0 && bus_rdata[31:28] == 4'hF) eret_start = 1'b1;
           else if(!bus_rdata[0]) begin set_fault = 1'b1; fault_val = 8'h02; end
           else begin bus_end = 1'b1; pc_en = 1'b1; pc_src = PC_BUS; done = 1'b1; end
         end
       end
       S_EXC: begin
+        case(ex_idx)            // register for the next stacked word (independent of bus_ready)
+          3'd3: rb = 4'd12;
+          3'd4: rb = 4'd14;
+          3'd5: iss_wd = WD_PC;
+          3'd6: iss_wd = WD_XPSR;
+          default: rb = {1'b0, ex_idx + 3'd1};
+        endcase
         if(bus_ready) begin
           if(bus_addr[31:2] == ibuf_addr) ibuf_inval = 1'b1;
           if(ex_idx == 3'd7) begin
@@ -629,13 +663,6 @@ always @* begin
             nstate = S_VEC;
           end else begin
             iss = 1'b1; iss_we = 1'b1; iss_addr = bus_addr + 32'd4;
-            case(ex_idx)
-              3'd3: rb = 4'd12;
-              3'd4: rb = 4'd14;
-              3'd5: iss_wd = WD_PC;
-              3'd6: iss_wd = WD_XPSR;
-              default: rb = {1'b0, ex_idx + 3'd1};
-            endcase
           end
         end
       end
@@ -655,8 +682,8 @@ always @* begin
             3'd6: begin pc_en = 1'b1; pc_src = PC_BUS; end
             default: begin
               fl_src = FL_BUS; ipsr_clear = 1'b1;
-              asel = A_EXSP; bimm_en = 1'b1; bimm = bus_rdata[9] ? 32'h24 : 32'h20;
-              sp_en = 1'b1; sp_val = sum[31:0];
+              // own adder: keeps bus data (cache hit path) out of the main ALU, whose sum drives the bus address
+              sp_en = 1'b1; sp_val = ex_sp + (bus_rdata[9] ? 32'h24 : 32'h20);
             end
           endcase
           if(ex_idx == 3'd7) begin bus_end = 1'b1; done = 1'b1; end
@@ -675,12 +702,22 @@ always @* begin
     nstate = S_ERET;
   end
   if(multi_start) nstate = S_MULTI;
+  if(mul_start) nstate = S_MULW;
   if(done) nstate = S_IDLE;
+  // early fetch: the next instruction's word is not in the buffer and its address does not depend on bus data
+  if(EARLY_FETCH && !step_mode && done && pc_en && !iss && !set_fault) begin
+    if((pc_src == PC_2 && pc[1]) || pc_src == PC_4) begin early = 1'b1; iss_addr = {pc4[31:2], 2'b00}; end
+    else if(pc_src == PC_ALU && aop == OP_ADD) begin early = 1'b1; iss_sum = 1'b1; iss_sum_clr = 3'b011; end
+    else if(pc_src == PC_RDB) begin early = 1'b1; iss_addr = {rdB[31:2], 2'b00}; end
+    if(early) begin iss = 1'b1; iss_we = 1'b0; iss_fetch = 1'b1; iss_size = 2'd2; nstate = S_FETCH; end
+  end
   if(set_fault) begin nstate = S_HALT; iss = 1'b0; bus_end = 1'b1; end
 end
 
+wire [31:0] iss_addr_f = iss_sum ? {sum[31:3], sum[2:0] & ~iss_sum_clr} : iss_addr;
+
 assign bus_next_req = iss & ~dbg_now;
-assign bus_next_addr = iss_addr;
+assign bus_next_addr = iss_addr_f;
 
 // write-back data
 reg [31:0] w_data;
@@ -736,6 +773,7 @@ always @(posedge clk) begin
     bus_req <= 1'b0; bus_we <= 1'b0; bus_fetch <= 1'b0; bus_size <= 2'd2; bus_addr <= 32'd0; bus_wdata <= 32'd0;
     ibuf_valid <= 1'b0;
     step_done <= 1'b0;
+    step_armed <= 1'b0;
     exc_ack <= 1'b0;
     fault <= 1'b0;
     fault_code <= 8'd0;
@@ -752,6 +790,8 @@ always @(posedge clk) begin
     else if(dbg_sel == 5'd19) ibuf_valid <= 1'b0;
   end else begin
     step_done <= done || (state == S_VEC && bus_ready);
+    if(done || (state == S_VEC && bus_ready) || set_fault) step_armed <= 1'b0;
+    else if(step_go) step_armed <= 1'b1;
     exc_ack <= exc_start;
     sleeping <= is_sleep;
     if(DEBUG && state != S_HALT && (state != S_IDLE || go)) stat_cycles <= stat_cycles + 64'd1;
@@ -791,11 +831,11 @@ always @(posedge clk) begin
     // fetch buffer
     if(fetch_now) begin
       ibuf <= bus_rdata;
-      ibuf_addr <= ib_addr;
+      ibuf_addr <= bus_addr[31:2];
       ibuf_valid <= 1'b1;
     end
     if(ibuf_inval) ibuf_valid <= 1'b0;
-    if(exec16_now && !exec32_now) ir1 <= op;
+    if(exec16_now && !exec32_now) ir1 <= op;   // first half of a 32-bit instruction, or the MUL for S_MULW
 
     // bus
     if(iss) begin
@@ -803,7 +843,7 @@ always @(posedge clk) begin
       bus_we <= iss_we;
       bus_fetch <= iss_fetch;
       bus_size <= iss_size;
-      bus_addr <= iss_addr;
+      bus_addr <= iss_addr_f;
       case(iss_wd)
         WD_PC: bus_wdata <= pc;
         WD_XPSR: bus_wdata <= ex_xpsr;

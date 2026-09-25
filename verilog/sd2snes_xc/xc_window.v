@@ -130,8 +130,11 @@ reg dma_drop;                    // flush while a read is in flight: discard its
 wire [18:0] h_addr = q_addr[q_head];
 wire [15:0] h_len = q_len[q_head];
 wire h_imm = q_imm[q_head];
-// keep 2 bytes of headroom: the ring pointer update is one cycle behind a write
-wire ring_room = (host_tx_free > 10'd2);
+// keep 2 bytes of headroom (the ring pointer update is one cycle behind a write), plus one because the
+// flag is registered (at most one more byte can be written in the cycle it is stale). Registered so the
+// DMA decision does not wait for two subtractions and a compare (clk2 timing).
+reg ring_room = 1'b0;
+always @(posedge clk) ring_room <= (host_tx_free > 10'd3);
 
 reg [31:0] stat_desc_r, stat_underrun_r;
 assign stat_desc = STATS ? stat_desc_r : 32'd0;
