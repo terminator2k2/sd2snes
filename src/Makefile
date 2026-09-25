@@ -98,6 +98,14 @@ SRC += spc7110rtc.c
 # Sufami Turbo Slot B autosave.  Linked into every config.
 SRC += sufami.c
 
+# Xeno Crisis (sd2snes_xc core): Opus decode service, mk3 (STM32F401) only.
+# Build the decoder library first: xc_opus/build.sh <opus-1.3.1 source dir>
+ifeq ($(CONFIG_MK3_STM32),y)
+SRC += xc_audio.c
+XC_OPUS_DIR ?= xc_opus
+XC_OPUS_LIB = $(XC_OPUS_DIR)/libopus_xc.a
+endif
+
 SRC += usbdesc.c usbcore.c usbuser.c cdcuser.c usbinterface.c
 
 # Wedge diagnostic instrument (wdiag.h): only a private diagnostic config sets
@@ -134,6 +142,9 @@ DEBUG = dwarf-2
 #     Use forward slashes for directory separators.
 #     For a directory that has spaces, enclose it in quotes.
 EXTRAINCDIRS =
+ifeq ($(CONFIG_MK3_STM32),y)
+EXTRAINCDIRS += $(XC_OPUS_DIR)/include
+endif
 
 # Compiler flag to set the C Standard level.
 #     c89   = "ANSI" C
@@ -222,6 +233,11 @@ LDFLAGS += -T$(LINKERSCRIPT)
 LDFLAGS += -Wl,--gc-sections
 # Print flash/ram/ahbram usage per link (the mk2 flash is the budget to watch).
 LDFLAGS += -Wl,--print-memory-usage
+
+# Xeno Crisis Opus decoder library
+ifeq ($(CONFIG_MK3_STM32),y)
+LDFLAGS += $(XC_OPUS_LIB)
+endif
 ifeq ($(CONFIG_LINKER_RELAX),y)
   LDFLAGS += -Wl,-O9,--relax
 endif

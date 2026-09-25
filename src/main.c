@@ -23,6 +23,7 @@
 #include "sdnative.h"
 #include "crc.h"
 #include "smc.h"
+#include "xc_audio.h"
 #include "msu1.h"
 #include "rtc.h"
 #include "sysinfo.h"
@@ -518,8 +519,18 @@ int main(void) {
 #ifdef GBC_WEDGE_DIAG
     wd_loop_enter();
 #endif
+
+#ifdef CONFIG_MK3_STM32
+    if(romprops.has_xc) xc_audio_init();
+#endif
+
     while(LOOP_FPGA_TEST() == FPGA_TEST_TOKEN) {
       cli_entrycheck();
+
+#ifdef CONFIG_MK3_STM32
+      if(romprops.has_xc) xc_audio_poll();   /* Xeno Crisis: Opus decode service */
+#endif
+
       //usb upload/boot/lock
       WD_SITE(WD_SITE_USBINT);
       usb_cmd |= usbint_handler();

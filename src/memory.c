@@ -40,6 +40,7 @@ memory.c: RAM operations
 #include "fpga_spi.h"
 #include "led.h"
 #include "smc.h"
+#include "xc_audio.h"
 #include "memory.h"
 #include "snes.h"
 #include "timer.h"
@@ -1770,30 +1771,38 @@ void init(uint8_t *filename) {
      savestate_program().  Probed on hardware: with the body live, 5/5 clean
      resumes and the reset-loop path never fires during a resume. */
   if (CFG.reset_patch) snescmd_writebyte(0, SNESCMD_RESET_HOOK+1);
-  cheat_yaml_load(filename);
-// XXX    cheat_yaml_save(filename);
-  /* Stage the in-game TAB menu bin (igmenu.bin) into PSRAM $C2 for real game loads
-     only (not a menu reload -- the $C2 dir buffer is the menu's own scratch there).
-     Bounded + fail-safe: a missing/bad bin just leaves IGMENU_GATE 0 (single-tab). */
-  /* Drop any RAM-trainer session and its pins on EVERY load, the menu included: the
-     cheat_program() below emits frozen pins into the NMI hook, and a stale one from the
-     previous game must never reach the menu or the next ROM. */
-  trainer_stage();
-  if (filename != (uint8_t *)MENU_FILENAME) {
-    igmenu_stage();
-    /* Stage the SAVES-tab status block for the in-game menu (game load only). */
-    saveinfo_stage(filename);
-    /* Stage the in-game MANUAL-tab meta (<rom>.man header/index -> MANUAL_META $FF0760).
-       Bounded + fail-safe: absent/bad/CFG-off just leaves the tab "not found".
-       INVARIANT -- the game load MUST keep calling the NON-cached manual_stage_meta():
-       it is the one that zeroes IGMENU_PERSIST_MAGIC_ADDR ($F4819E). The menu-side viewer
-       (snes/manhost.a65, X on the game-info screen) WRITES that magic when it closes, so
-       switching this call to manual_stage_meta_cached() would let a reading position picked
-       in the MENU leak into the in-game GUIDES tab of whatever game boots next. */
-    manual_stage_meta(filename);
+#ifdef CONFIG_MK3_STM32
+  /* Xeno Crisis: start the soft CPU with the SNES */
+  if (romprops.has_xc) xc_run(1);
+#endif
+
+  /*
+   * Xeno Crisis uses the cheat area of PSRAM.
+   * Do not program normal cheats or savestates for this core.
+   */
+  if (!romprops.has_xc) {
+    cheat_yaml_load(filename);
+
+    /* Stage the in-game TAB menu bin (igmenu.bin) into PSRAM $C2 for
+       real game loads only. Missing or invalid files are ignored. */
+
+    /* Drop any RAM-trainer session and its pins on every load. */
+    trainer_stage();
+
+    if (filename != (uint8_t *)MENU_FILENAME) {
+      igmenu_stage();
+
+      /* Stage the SAVES-tab status block. */
+      saveinfo_stage(filename);
+
+      /* Use the non-cached function to clear the persistent
+         manual-viewer state when loading a new game. */
+      manual_stage_meta(filename);
+    }
+
+    cheat_program();
+    savestate_program();
   }
-  cheat_program();
-  savestate_program();
   fpga_set_features(romprops.fpga_features);
   fpga_reset_srtc_state();
   snes_set_mcu_cmd(0);
