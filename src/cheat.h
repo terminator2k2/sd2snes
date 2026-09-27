@@ -22,6 +22,7 @@
  */
 
 #include CONFIG_MCU_H
+#include "cheatcode.h"
 
 #define CHEAT_BASEDIR   ("/sd2snes/cheats/")
 
@@ -107,23 +108,33 @@ void cheat_holdoff_enable(int enable);
 void cheat_buttons_enable(int enable);
 void cheat_wram_present(int enable);
 
-/* read cheats from YAML file and convert to SNES structure */
+/* read cheats from YAML file and convert to SNES structure.  Also records the
+   resolved .yml path in SRAM_CHEAT_YML_PATH_ADDR for cheat_yaml_save_current. */
 void cheat_yaml_load(uint8_t *romfilename);
 /* save SNES structure as YAML file */
 void cheat_yaml_save(uint8_t *romfilename);
+/* rewrite the .yml the last cheat_yaml_load opened (cheat editor: the list being
+   edited is the one that came from that file).  0 = written, non-zero = nothing
+   written (no path recorded, or the SD refused). */
+int cheat_yaml_save_current(void);
 
 /* toggle bit 7 of the flag byte for a cheat record (CMD_TOGGLE_CHT) */
 void cheat_toggle_flag(int index);
 
-/* in-game live re-program (CMD_CHEAT_REPROGRAM): reconcile the BSRAM flag
-   mirror into the canonical PSRAM records and re-deploy all cheats */
+/* fold the SNES-writable $FF0500 enable mirror back into bit 7 of every
+   canonical record (the in-game toggles live only in the mirror until then) */
+void cheat_sync_flags_from_mirror(void);
+
+/* in-game live re-program (CMD_CHEAT_REPROGRAM): cheat_sync_flags_from_mirror +
+   re-deploy all cheats */
 void cheat_reprogram_from_mirror(void);
 
-/* convert cheat code in string format to binary */
-uint32_t cheat_str2bin(char *string);
-
-/* convert between raw/PAR and GG codes */
-uint32_t cheat_gg2raw(uint32_t code);
-uint32_t cheat_raw2gg(uint32_t code);
+/* per-code display string slots at SRAM_CHEAT_CODE_STRINGS_ADDR (12 B each,
+   cheat_idx*512 + code_idx*12: 9 visible chars space-padded + 3 NULs).  read
+   trims and NUL-terminates into a 12-byte buffer; returns 0 for a blank slot, so
+   callers fall back to the raw hex form.  The array is NOT cleared between loads:
+   whoever creates a record (yaml load, cheat editor, trainer) writes its strings. */
+void cheat_write_code_string(int cheat_idx, int code_idx, const char *s);
+int  cheat_read_code_string(int cheat_idx, int code_idx, char *out);
 
 #endif

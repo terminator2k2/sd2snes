@@ -330,18 +330,20 @@ text_igm_tr_current              .byt "CURRENT", 0
 text_igm_tr_setvalue             .byt "SET VALUE", 0
 text_igm_tr_freeze               .byt "FREEZE", 0
 text_igm_tr_unfreeze             .byt "UNFREEZE", 0
-text_igm_tr_addcheat             .byt "ADD TO CHEATS", 0
+text_igm_tr_savecheat            .byt "SAVE CHEAT", 0
 text_igm_tr_frozen               .byt "FROZEN", 0
 text_igm_tr_searching            .byt "Searching...", 0
 text_igm_tr_noresults            .byt "No results left", 0
 text_igm_tr_toomany              .byt "Too many results - filter again", 0
-text_igm_tr_dropped_ss           .byt "Search reset - savestate loaded", 0
 text_igm_tr_dropped_rst          .byt "Search reset - console reset", 0
-text_igm_tr_nofreeze             .byt "No free cheat slot", 0
+text_igm_tr_nofreeze             .byt "4 frozen values at most", 0
 text_igm_tr_hint_setup           .byt "A: select   D-Pad: change", 0
 text_igm_tr_hint_edit            .byt "D-Pad: edit   A: OK   B: cancel", 0
 text_igm_tr_hint_list            .byt "A: inspect   B: back", 0
 text_igm_tr_master_off           .byt "Cheats master is OFF", 0
+text_igm_tr_saved                .byt "Cheat saved", 0
+text_igm_tr_savefail             .byt "Could not save the cheat", 0
+text_igm_tr_unpin                .byt "REMOVE FROM LIST", 0
 mtext_cfg_time                    .byt "Set Clock", 0
 mtext_cfg_ask_clock               .byt "Ask for clock on boot", 0
 mtext_cfg_bsx                     .byt "BS-X Settings", 0
@@ -521,6 +523,10 @@ text_cheat_yes  .byt "Yes ", 0
 text_cheat_no   .byt "No  ", 0
 text_cheat_none_title .byt "Cheats", 0
 text_cheat_none_msg   .byt "No cheats found for this ROM", 0
+; cheat editor (snes/cheatedit.a65): the one translated label it needs; everything else it
+; prints is either reused (text_save, text_add, text_filesel_context_delete_file,
+; text_cheat_none_title, text_pcm_nosup) or language-neutral data in bank $C1.
+text_ce_name          .byt "Name", 0
 
 ; delete-confirmation dialog (see confirm_delete in filesel.a65)
 text_confirm_delete_file .byt "Delete this file?", 0
@@ -733,10 +739,26 @@ text_cheat      .byt "Cheats for ", 0
 ; gets text_igm_cheat_noname staged into OVL_NONAME_BUF by whichever host opened it.
 text_igm_ch_none      .byt "No cheats", 0
 text_igm_ft_tab       .byt "<>:TAB L/R:ENDS A:OPEN B:CLOSE", 0
-text_igm_ft_cheats    .byt "<>:PAGE L/R:TOP/END A:ON/OFF X:CHEATS B:BACK", 0
+text_igm_ft_cheats    .byt "A:ON/OFF Y:EDIT SEL:ADD X:CHEATS B:BACK", 0
 text_igm_ft_generic   .byt "A:SELECT B:BACK", 0
 text_igm_master_on    .byt "CHEATS: ON", 0
 text_igm_master_off   .byt "CHEATS: OFF", 0
+text_igm_ft_ce_edit   .byt "A:EDIT SEL:ADD CODE Y:REMOVE B:BACK", 0
+text_igm_ft_ce_kbd    .byt "A:TYPE Y:DELETE SEL:SPACE X:OK B:CANCEL", 0
+; ---- In-game cheat EDITOR (CHEATS tab: Y = edit, Select = add). ENGLISH base; per-language
+;      dicts carry the translations; gen_igmenu_lang.py emits igm_cheatedit_tbl (bank $C8).
+;      Lockstep with CHEATEDIT_LABELS + the IGM_CE_* indices in snes/cheatedit_defs.i65.
+;      Centered lines <= 52 encoded cols (the frame interior); the Name label <= 7.
+text_igm_ce_title_new    .byt "NEW CHEAT", 0
+text_igm_ce_title_edit   .byt "EDIT CHEAT", 0
+text_igm_ce_name         .byt "Name:", 0
+text_igm_ce_save         .byt "SAVE", 0
+text_igm_ce_delete       .byt "DELETE CHEAT", 0
+text_igm_ce_confirm      .byt "Delete this cheat?", 0
+text_igm_ce_confirm_keys .byt "A: yes   B: no", 0
+text_igm_ce_nosup        .byt "Please update the firmware", 0
+text_igm_ce_full         .byt "The cheat list is full", 0
+text_igm_ce_badcode      .byt "Invalid code", 0
 text_cheat_noname .byt "(no name)", 0
 text_igm_cheat_noname .byt "(no name)", 0
 text_ips_header .byt "Patches", 0
@@ -807,7 +829,7 @@ cheat_tab_head  .byt "Description                              Enabled", 0
 ; is sized for the longer (left) side; the draw routine prints just 7
 ; of these for the right side.
 cheat_tab_hint_bars .byt 25,25,25,25,25,25,25,25,0
-cheat_tab_hint_text .byt " A:Enable/Disable   B:Save & Exit ", 0
+cheat_tab_hint_text .byt " A:On/Off  Y:Edit  Sel:Add  B:Exit", 0
 
 text_spcid      .byt "SNES-SPC700"
 text_easter_egg  .byt "Traduzido por Luan Freitas (@ludufre)", 0
