@@ -35,6 +35,7 @@
 #include "cfg.h"
 #include "memory.h"
 #include "sufami.h"
+#include "bootleg.h"
 
 extern cfg_t CFG;
 snes_romprops_t romprops;
@@ -569,6 +570,26 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
      && header->chk == 0x9e4d
      && header->cchk == 0x61b2) {
     props->mapper_id = 4;
+  }
+  
+  /* Copy-protected unlicensed bootlegs (fpga_bootleg core, see bootleg.c).
+     Identified by image CRC32, only on a game load (bootleg_scan, set by
+     memory.c) and only for an image size that occurs in the table.  Runs even
+     if the header claimed a chip -- pirate headers are copied/garbage -- and a
+     match wins over whatever the header said.
+     SDRAM mode (IPS/BPS re-detect) cannot afford a PSRAM CRC: a patched image
+     of the bootleg that is currently loaded keeps its variant instead, so a
+     translation patch does not recore it back to fpga_base. */
+  if(!props->has_combo && props->mapper_id != 4) {
+    uint32_t image_size = SMC_FSIZE() - props->offset;
+    uint8_t variant = BOOTLEG_NONE;
+    if(!smc_src_active) {
+      if(bootleg_scan) variant = bootleg_identify_file(file_offset + props->offset, image_size);
+    } else if(props != &romprops && romprops.fpga_conf == FPGA_BOOTLEG
+              && romprops.fpga_dspfeat != BOOTLEG_NONE) {
+      variant = (uint8_t)romprops.fpga_dspfeat;
+    }
+    bootleg_apply(props, variant, image_size);
   }
 
   /* $80-$9F boot remap for the listed LoROM slot carts (see smc_needs_bslorom).

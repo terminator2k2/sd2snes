@@ -32,6 +32,7 @@ memory.c: RAM operations
 #include "cic.h"
 #include "crc.h"
 #include "crc32.h"
+#include "bootleg.h"
 #include "ff.h"
 #include "fileops.h"
 #include "spi.h"
@@ -1263,7 +1264,12 @@ static uint32_t load_identify(load_ctx_t *c) {
   uint8_t flags = c->flags;
 
   smc_set_file_span(c->filesize);
+    /* game loads only: CRC-scan 1/2/3 MB images for protected bootlegs (bootleg.c) */
+  bootleg_scan = !c->is_menu && !(flags & LOADROM_WITH_COMBO)
+                 && !sms_active && !a26_romprops.has_a26
+                 && !sgb_romprops.has_sgb && !nes_romprops.has_nes;
   smc_id(&romprops, c->file_offset);
+  bootleg_scan = 0;
   /* the player is a plain LoROM; force the SMS core + drop any chip the header faked */
   if (sms_active) {
     romprops.fpga_conf = FPGA_SMS;
