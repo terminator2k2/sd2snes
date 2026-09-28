@@ -43,10 +43,10 @@ Track n is the game's music stream n. The length is the game's own version, for 
 | 22 | MUSIC_5_SHOP | 0:22.4 | Loops. Soundtrack: "Stage Clear". |
 | 23 | MUSIC_6_CONTINUE | 0:34.8 | Not the soundtrack's "Continue" (that is 21). |
 | 24 | MUSIC_7_STAGE_CLEAR | 0:07.2 | Soundtrack: "Game Over" (the audio matches this stream, not 25). |
-| 25 | MUSIC_8_GAME_OVER | 0:12.0 | |
+| 25 | MUSIC_8_GAME_OVER | 0:12.0 | Soundtrack: "Cutscene". |
 | 26 | MUSIC_9_ENDING | 2:00.0 | |
 
-Some of the firmware's stream names do not match the soundtrack titles ("Game Over" is stream 24, "Continue" 21, "Stage Clear" 22): the slot is the stream whose music it is, found by comparing the audio.
+Some of the firmware's stream names do not match the soundtrack titles ("Game Over" is stream 24, "Continue" 21, "Stage Clear" 22, "Cutscene" 25): the slot is the stream whose music it is, found by comparing the audio.
 
 ## How tracks are played
 
