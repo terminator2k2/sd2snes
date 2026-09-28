@@ -44,7 +44,7 @@ Track n is the game's music stream n. The length is the game's own version, for 
 | 23 | MUSIC_6_CONTINUE | 0:34.8 | Loops. Soundtrack: "Upgrade" (the game's stream is one 30.3 s pass plus a 4.4 s ring-out; the soundtrack loops the pass). |
 | 24 | MUSIC_7_STAGE_CLEAR | 0:07.2 | Played once. Soundtrack: "Game Over" (the audio matches this stream, not 25). |
 | 25 | MUSIC_8_GAME_OVER | 0:12.0 | Played once. Soundtrack: "Cutscene". |
-| 26 | MUSIC_9_ENDING | 2:00.0 | Loops. |
+| 26 | MUSIC_9_ENDING | 2:00.0 | Loops (from the start, after its fade). Soundtrack: "Ending". |
 
 Some of the firmware's stream names do not match the soundtrack titles ("Game Over" is stream 24, "Continue" 21, "Stage Clear" 22, "Upgrade" 23, "Cutscene" 25): the slot is the stream whose music it is, found by comparing the audio.
 
