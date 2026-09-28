@@ -20,7 +20,7 @@ Track n is the game's music stream n. The length is the game's own version, for 
 | n | Game track | Game length | Notes |
 |---|---|---|---|
 | 1 | MUSIC_0_INTRO_VOICED | 0:31.6 | Played once (boot intro). Soundtrack: "Intro". |
-| 2 | MUSIC_10_ALARM | 0:05.4 | Played once or looped, depending on the situation. |
+| 2 | MUSIC_10_ALARM | 0:05.4 | Played once or looped, depending on the situation. Soundtrack: "Sound Effects part 1", 3.08-8.52 s (cut to the game's 5.44 s). |
 | 3 | MUSIC_1_TITLE | 0:36.4 | Loops. Soundtrack: "Title". |
 | 4 | MUSIC_2_INGAME_0_INTRO | 0:02.8 | Intro of 5. Soundtrack: "Perimeter (Area 1)" (its intro). |
 | 5 | MUSIC_2_INGAME_0_LOOP | 1:47.0 | Loops. Soundtrack: "Perimeter (Area 1)" (its loop). |
