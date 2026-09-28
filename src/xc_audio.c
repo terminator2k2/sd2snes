@@ -26,12 +26,31 @@ uint32_t xc_audio_packets, xc_audio_errors;
 static uint32_t status_polls;
 static uint8_t halt_reported;
 
+/* SPI to the FPGA, one byte at a time, the way the stock firmware talks to it.
+ *  - spi_rx_block()/spi_tx_block() (FPGA_RX_BLOCK/FPGA_TX_BLOCK) are never used with the FPGA elsewhere and are
+ *    unsafe here. spi_rx_block() hangs for lengths that are a multiple of 4 on an aligned buffer: its DMA path
+ *    uses peripheral flow control, which SPI does not support, so the transfer-complete flag never sets. And
+ *    both run bytes back to back, while spi.v needs a gap after each byte (it loads the next read value and
+ *    latches a written byte a few CLK2 cycles after the byte ends).
+ *  - reads: FPGA_RX_BYTE() waits for the bus to go idle before each byte (as get_msu_pointer() does);
+ *  - writes: FPGA_TX_BYTE() + FPGA_TX_SYNC() leaves the same gap after each byte. */
+static void xc_rx(uint8_t* dst, uint32_t n)
+{
+	while(n--) *dst++ = FPGA_RX_BYTE();
+}
+
+static void xc_tx(uint8_t b)
+{
+	FPGA_TX_BYTE(b);
+	FPGA_TX_SYNC();
+}
+
 void xc_run(uint8_t run)
 {
 	FPGA_SELECT();
-	FPGA_TX_BYTE(FPGA_CMD_XC_RUN);
-	FPGA_TX_BYTE(run);
-	FPGA_TX_BYTE(0x00); /* flop */
+	xc_tx(FPGA_CMD_XC_RUN);
+	xc_tx(run);
+	xc_tx(0x00); /* flop */
 	FPGA_DESELECT();
 }
 
@@ -49,7 +68,7 @@ static uint8_t read_status(uint16_t* len)
 {
 	uint8_t st;
 	FPGA_SELECT();
-	FPGA_TX_BYTE(FPGA_CMD_XCA_STATUS);
+	xc_tx(FPGA_CMD_XCA_STATUS);
 	FPGA_RX_BYTE(); /* null read to create delay */
 	st = FPGA_RX_BYTE();
 	*len = FPGA_RX_BYTE();
@@ -64,7 +83,7 @@ static void check_soc(void)
 	uint8_t st;
 	uint32_t code = 0, addr = 0;
 	FPGA_SELECT();
-	FPGA_TX_BYTE(FPGA_CMD_XC_STATUS);
+	xc_tx(FPGA_CMD_XC_STATUS);
 	FPGA_RX_BYTE(); /* null read */
 	st = FPGA_RX_BYTE();
 	for(int i = 0; i < 4; i++) code |= (uint32_t)FPGA_RX_BYTE() << (8 * i);
@@ -88,7 +107,7 @@ void xc_audio_poll(void)
 	if(st & XCA_ST_RESET) {
 		decoder_ok = opus_decoder_init((OpusDecoder*)decoder_mem, 24000, 2) == OPUS_OK;
 		FPGA_SELECT();
-		FPGA_TX_BYTE(FPGA_CMD_XCA_ACKRESET);
+		xc_tx(FPGA_CMD_XCA_ACKRESET);
 		FPGA_DESELECT();
 		return; /* pick up a job on the next poll, after the reset is acknowledged */
 	}
@@ -100,9 +119,9 @@ void xc_audio_poll(void)
 		len = sizeof(packet);
 	}
 	FPGA_SELECT();
-	FPGA_TX_BYTE(FPGA_CMD_XCA_READPKT);
+	xc_tx(FPGA_CMD_XCA_READPKT);
 	FPGA_RX_BYTE(); /* null read */
-	FPGA_RX_BLOCK(packet, len);
+	xc_rx(packet, len);
 	FPGA_DESELECT();
 
 	int32_t ret;
@@ -120,14 +139,17 @@ void xc_audio_poll(void)
 	xc_audio_packets++;
 
 	FPGA_SELECT();
-	FPGA_TX_BYTE(FPGA_CMD_XCA_WRITEPCM);
-	FPGA_TX_BLOCK((uint8_t*)pcm, sizeof(pcm)); /* the MCU is little-endian like the RP2040 */
+	xc_tx(FPGA_CMD_XCA_WRITEPCM);
+	{
+		const uint8_t* p = (const uint8_t*)pcm;  /* the MCU is little-endian like the RP2040 */
+		for(uint32_t i = 0; i < sizeof(pcm); i++) xc_tx(p[i]);
+	}
 	FPGA_DESELECT();
 
 	FPGA_SELECT();
-	FPGA_TX_BYTE(FPGA_CMD_XCA_DONE);
-	for(int i = 0; i < 4; i++) FPGA_TX_BYTE((uint8_t)((uint32_t)ret >> (8 * i)));
-	for(int i = 0; i < 4; i++) FPGA_TX_BYTE((uint8_t)(range >> (8 * i)));
-	FPGA_TX_BYTE(0x00); /* flop reset */
+	xc_tx(FPGA_CMD_XCA_DONE);
+	for(int i = 0; i < 4; i++) xc_tx((uint8_t)((uint32_t)ret >> (8 * i)));
+	for(int i = 0; i < 4; i++) xc_tx((uint8_t)(range >> (8 * i)));
+	xc_tx(0x00); /* flop reset */
 	FPGA_DESELECT();
 }
