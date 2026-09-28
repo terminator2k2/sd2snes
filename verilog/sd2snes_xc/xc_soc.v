@@ -32,7 +32,8 @@
 // TX_LEN first cleans the lines of [TX_ADDR, TX_ADDR + length) (or the whole cache for long ranges).
 //////////////////////////////////////////////////////////////////////////////////
 module xc_soc #(
-  parameter CLK_MHZ = 40,
+  parameter CLK_NUM = 40,            // clk frequency = CLK_NUM / CLK_DEN MHz (sd2snes PLL: 161/4 = 40.25 MHz)
+  parameter CLK_DEN = 1,
   parameter CORE_DEBUG = 0          // xc_m0 debug read port and counters (lockstep harness only)
 ) (
   input clk,
@@ -283,14 +284,14 @@ wire [31:0] i_word = i_hit1 ? iq1 : iq0;
 //------------------------------------------------------------------------------
 // timer: 64-bit microseconds
 reg [63:0] time_us;
-reg [7:0] us_div;
+reg [15:0] us_div;                  // phase accumulator: + CLK_DEN per clock, one microsecond per CLK_NUM
 reg [31:0] time_latch_hi;
 always @(posedge clk) begin
   if(rst) begin
-    time_us <= 64'd0; us_div <= 8'd0;
-  end else if(us_div == CLK_MHZ - 1) begin
-    us_div <= 8'd0; time_us <= time_us + 64'd1;
-  end else us_div <= us_div + 8'd1;
+    time_us <= 64'd0; us_div <= 16'd0;
+  end else if(us_div + CLK_DEN >= CLK_NUM) begin
+    us_div <= us_div + CLK_DEN - CLK_NUM; time_us <= time_us + 64'd1;
+  end else us_div <= us_div + CLK_DEN;
 end
 
 // BRR encoder, tick
@@ -300,7 +301,7 @@ wire tick_sel = idle_req & (cls == C_TICK) & bus_we & (bus_addr[11:0] < 12'h010)
 wire [31:0] brr_rdata, tick_rdata;
 wire brr_busy, tick_irq;
 xc_brr brr (.clk(clk), .rst(rst), .sel(brr_sel), .we(bus_we), .addr(bus_addr[6:2]), .wdata(bus_wdata), .rdata(brr_rdata), .busy(brr_busy));
-xc_tick #(.CLK_MHZ(CLK_MHZ)) tick (.clk(clk), .rst(rst), .sel(tick_sel), .we(bus_we), .addr(bus_addr[3:2]), .wdata(bus_wdata), .rdata(tick_rdata), .irq(tick_irq));
+xc_tick #(.CLK_NUM(CLK_NUM), .CLK_DEN(CLK_DEN)) tick (.clk(clk), .rst(rst), .sel(tick_sel), .we(bus_we), .addr(bus_addr[3:2]), .wdata(bus_wdata), .rdata(tick_rdata), .irq(tick_irq));
 
 // divider (RP2040 SIO semantics as MesenCE: results after the last dividend/divisor write)
 reg [31:0] div_dividend, div_divisor;

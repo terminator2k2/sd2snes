@@ -107,13 +107,17 @@ module pll (
 				.vcounderrange ());
 	defparam
 		altpll_component.bandwidth_type = "AUTO",
-		altpll_component.clk0_divide_by = 8000,
+		// Both outputs come from one VCO: 8 MHz x 161 = 1288 MHz. clk0 = /15 = 85.867 MHz (what the fitter makes of
+		// the other cores' 85.909 MHz request, see main.sdc), clk1 = /32 = 40.25 MHz for the soft CPU (xc_top
+		// SOC_CLK_NUM/DEN = 161/4). An exact 40 MHz next to 85.867 MHz has no common VCO (Quartus error 15094).
+		// Fallback for timing: clk1 = 161/40 = 32.2 MHz with SOC_CLK_NUM/DEN = 161/5.
+		altpll_component.clk0_divide_by = 15,
 		altpll_component.clk0_duty_cycle = 50,
-		altpll_component.clk0_multiply_by = 85909,
+		altpll_component.clk0_multiply_by = 161,
 		altpll_component.clk0_phase_shift = "0",
-		altpll_component.clk1_divide_by = 1,
+		altpll_component.clk1_divide_by = 32,
 		altpll_component.clk1_duty_cycle = 50,
-		altpll_component.clk1_multiply_by = 5,
+		altpll_component.clk1_multiply_by = 161,
 		altpll_component.clk1_phase_shift = "0",
 		altpll_component.compensate_clock = "CLK0",
 		altpll_component.inclk0_input_frequency = 125000,

@@ -22,8 +22,11 @@ Status: everything is simulated and checked except what needs Quartus or hardwar
  MCU    <-> mcu_cmd.v ($C0-$C6) <-> xc_decbox (Opus mailbox) <== bridge ===>   |   timer, SIO, NVIC, BRR, tick
 ```
 
-- **Clock domains.** The soft CPU runs in its own clock domain, 40 MHz from a second PLL output (8 MHz × 5). The sd2snes side (`CLK2`) keeps the GSU core's 85.9 MHz.
-- **The crossing.** Everything crosses through `xc_bridge`. It carries one operation at a time: a cache line, a register access or a single uncached access. The request and completion are toggles through two-flop synchronizers, and the data sits in two small dual-clock RAMs. The SoC clock can therefore be changed freely (`SOC_MHZ` and the PLL's `clk1_multiply_by`).
+- **Clock domains.**
+  - The soft CPU runs in its own clock domain, **40.25 MHz** from a second output of the same PLL (8 MHz × 161/32). The sd2snes side (`CLK2`) keeps the GSU core's 85.87 MHz (8 MHz × 161/15).
+  - Both outputs share one 1,288 MHz VCO. An exact 40 MHz is impossible next to 85.87 MHz, because there is no common VCO (Quartus error 15094).
+  - The SoC's microsecond timer and mixer tick take the clock as a fraction (`SOC_CLK_NUM/SOC_CLK_DEN` = 161/4 MHz) and use phase accumulators, so time stays exact. `tb_xc_clkfrac.v` checks this for 161/4, 40/1, 1288/33 and 161/5.
+- **The crossing.** Everything crosses through `xc_bridge`. It carries one operation at a time: a cache line, a register access or a single uncached access. The request and completion are toggles through two-flop synchronizers, and the data sits in two small dual-clock RAMs. The SoC clock can therefore be changed freely. Set the PLL's `clk1` to 161/*d* and `SOC_CLK_NUM/SOC_CLK_DEN` to 1288/*d* MHz, reduced (for example *d* = 40: 32.2 MHz, 161/5). Also set the `clk[1]` line in `main.sdc`.
 - **Memory buses.** The ROM bus (PSRAM) and RAM bus (SRAM chip) requests use the ports and state machines of the GSU core.
   - The PSRAM is shared with the SNES through the existing free-slot scheme: one access per SNES cycle, when the SNES isn't reading ROM.
   - The SNES never touches the SRAM chip in this core, so the SRAM bus is all ours: 7 cycles (≈80 ns) per byte.
@@ -208,13 +211,14 @@ A second path of the same length went from the adder, through the next bus addre
 
 **Area:** 244 fewer LUTs and 62 more flip-flops (same Yosys flow, before vs after).
 
-What's left on `clk_soc` is the register read → adder → next bus address → cache key path. On `clk2` it is the `TX_PENDING` sum. **40 MHz should now close with about 15–25% margin.** Quartus has the last word. If it doesn't close, `SOC_MHZ` 32 with PLL multiply 4 is now a comfortable fallback.
+What's left on `clk_soc` is the register read → adder → next bus address → cache key path. On `clk2` it is the `TX_PENDING` sum. **40.25 MHz (24.84 ns, the PLL's actual clock) should now close with about 15–25% margin.** Quartus has the last word. If it doesn't close, the fallback is 32.2 MHz: PLL `clk1` 161/40, `SOC_CLK_NUM/DEN` 161/5, and `main.sdc` `clk[1]` 161/40.
 
 ## Not done yet
 
 1. **Quartus fit and timing.**
-   - The estimate above says both domains close, `clk_soc` with 15–25% margin. Check `clk_soc` at 40 MHz and `clk2` at 85.9 MHz in the Quartus timing report.
-   - The fallback is still `clk1_multiply_by` 4 with `SOC_MHZ` 32.
+   - The estimate above says both domains close, `clk_soc` with 15–25% margin. Check `clk_soc` (`clk[1]`, 40.25 MHz) and `clk2` (`clk[0]`, 85.87 MHz) in the Quartus timing report.
+   - Fallback: 32.2 MHz (see "Timing").
+   - The first Quartus run failed on the PLL (an exact 40 MHz next to 85.87 MHz can't be made; error 15094). The fix: `clk1` = 161/32, and `clk0` requested as the exact 161/15 it already ran at.
 2. **First hardware run.**
    - Check that `SNES_DEADr` behaves as the SoC reset expects during the MCU's reset sequence.
    - Watch the UART for the halt report.

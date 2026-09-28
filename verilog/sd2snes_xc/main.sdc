@@ -47,8 +47,8 @@ create_clock -name {SPI_SCK} -period 20.833 -waveform { 0.000 10.417 } [get_port
 #**************************************************************
 
 create_generated_clock -name {snes_pll|altpll_component|auto_generated|pll1|clk[0]} -source [get_pins {snes_pll|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 161 -divide_by 15 -master_clock {CLKIN} [get_pins {snes_pll|altpll_component|auto_generated|pll1|clk[0]}] 
-# Xeno Crisis soft CPU clock (xc_soc), 40 MHz
-create_generated_clock -name {snes_pll|altpll_component|auto_generated|pll1|clk[1]} -source [get_pins {snes_pll|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 5 -master_clock {CLKIN} [get_pins {snes_pll|altpll_component|auto_generated|pll1|clk[1]}] 
+# Xeno Crisis soft CPU clock (xc_soc): 8 MHz x 161/32 = 40.25 MHz (same VCO as clk[0])
+create_generated_clock -name {snes_pll|altpll_component|auto_generated|pll1|clk[1]} -source [get_pins {snes_pll|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 161 -divide_by 32 -master_clock {CLKIN} [get_pins {snes_pll|altpll_component|auto_generated|pll1|clk[1]}] 
 
 
 #**************************************************************

@@ -13,7 +13,8 @@
 //   MCU: the decode mailbox ports (mcu_cmd.v, XCA_* commands) and a run/reset control
 //////////////////////////////////////////////////////////////////////////////////
 module xc_top #(
-  parameter SOC_MHZ = 40,
+  parameter SOC_CLK_NUM = 40,        // soft CPU clock = SOC_CLK_NUM / SOC_CLK_DEN MHz (sd2snes PLL: 161/4 = 40.25 MHz)
+  parameter SOC_CLK_DEN = 1,
   parameter STATS = 1              // window statistics (simulation); 0 on hardware
 ) (
   input clk2,
@@ -95,7 +96,7 @@ wire [2:0] wb_addr, rb_addr;
 wire [31:0] wb_data, rb_q;
 reg dec_irq_tog = 1'b0;
 
-xc_soc #(.CLK_MHZ(SOC_MHZ)) soc (
+xc_soc #(.CLK_NUM(SOC_CLK_NUM), .CLK_DEN(SOC_CLK_DEN)) soc (
   .clk(clk_soc), .rst(rst_soc),
   .op_start(op_start), .op_kind(op_kind), .op_addr(op_addr), .op_len(op_len),
   .wb_we(wb_we), .wb_addr(wb_addr), .wb_data(wb_data), .op_done(op_done), .rb_addr(rb_addr), .rb_q(rb_q),

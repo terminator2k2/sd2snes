@@ -409,7 +409,7 @@ wire        xc_running, xc_halted;
 wire        xc_run;
 wire [31:0] xc_halt_code, xc_halt_addr;
 
-xc_top #(.SOC_MHZ(40), .STATS(0)) snes_xc (
+xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(0)) snes_xc (   // 40.25 MHz, must match the PLL's clk1
   .clk2(CLK2),
   .clk_soc(CLK_SOC),
   .rst2(SNES_DEADr),
@@ -738,7 +738,7 @@ snescmd_buf snescmd (
 pll snes_pll(
   .inclk0(CLKIN),
   .c0(CLK2),
-  .c1(CLK_SOC),       // soft CPU clock, 40 MHz (xc_top SOC_MHZ)
+  .c1(CLK_SOC),       // soft CPU clock, 8 MHz x 161/32 = 40.25 MHz (xc_top SOC_CLK_NUM/DEN)
   .locked(DCM_LOCKED),
   .areset(DCM_RST)
 );
