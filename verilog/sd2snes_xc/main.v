@@ -308,10 +308,10 @@ sd_dma snes_sd_dma(
 
 assign SD_DMA_TO_ROM = (SD_DMA_STATUS && (SD_DMA_TGT == 2'b00));
 
-// MSU-1 and the audio DAC: only in the Xeno Crisis MSU-1 core (fpga_xc_msu.bi3, `define XC_MSU; the
-// fpga_xc_msu revision of this project). There the music comes from an MSU-1 pack: the soft CPU writes
-// the MSU-1 registers (xc_msubox in xc_top), the SNES does not see them. msu.v is audio-only (no 16 KB data
-// buffer), xc_dac.v is dac.v with linear interpolation instead of the CIC (fits next to the soft CPU).
+// MSU-1 and the audio DAC: only in the Xeno Crisis MSU-1 core (fpga_xc_msu.bi3, `define XC_MSU: the project
+// in ../sd2snes_xc_msu, which builds this main.v). There the music comes from an MSU-1 pack: the soft CPU
+// writes the MSU-1 registers (xc_msubox in xc_top), the SNES does not see them. Its msu.v is audio-only (no
+// 16 KB data buffer), xc_dac.v is dac.v with linear interpolation instead of the CIC (fits next to the soft CPU).
 wire       xc_msu_we;
 wire [2:0] xc_msu_addr;
 wire [7:0] xc_msu_data;

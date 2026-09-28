@@ -525,8 +525,6 @@ set_global_assignment -name VERILOG_FILE xc_bridge.v
 set_global_assignment -name VERILOG_FILE xc_window.v
 set_global_assignment -name VERILOG_FILE xc_stream.v
 set_global_assignment -name VERILOG_FILE xc_decbox.v
-set_global_assignment -name VERILOG_FILE xc_msubox.v
-set_global_assignment -name VERILOG_FILE xc_dac.v
 set_global_assignment -name VERILOG_FILE xc_brr.v
 set_global_assignment -name VERILOG_FILE xc_tick.v
 set_global_assignment -name VERILOG_FILE rtc.v
