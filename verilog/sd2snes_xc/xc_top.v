@@ -18,7 +18,8 @@ module xc_top #(
   parameter SOC_CLK_DEN = 1,
   parameter STATS = 1,             // window statistics (simulation); 0 on hardware
   parameter DIDX = 8,              // D-cache: 2^DIDX sets x 2 ways x 32 B (8 = 16 KB)
-  parameter IIDX = 8               // I-cache: 2^IIDX sets x 2 ways x 32 B (8 = 16 KB)
+  parameter IIDX = 8,              // I-cache: 2^IIDX sets x 2 ways x 32 B (8 = 16 KB)
+  parameter MSU = 0                // 1: MSU-1 core (xc_msubox instead of the Opus decode mailbox)
 ) (
   input clk2,
   input clk_soc,
@@ -62,6 +63,12 @@ module xc_top #(
   input [31:0] mcu_ret,
   input [31:0] mcu_range,
   input mcu_ack_reset,
+
+  // MSU-1 core (MSU = 1): msu.v register writes from the soft CPU, clk2 domain
+  output msu_we,
+  output [2:0] msu_addr,
+  output [7:0] msu_data,
+  input [7:0] msu_status,
 
   // status (clk_soc domain; quasi-static)
   output soc_running,
@@ -160,6 +167,17 @@ xc_window #(.STATS(STATS)) window (
 // Decode mailbox
 //------------------------------------------------------------------------------
 wire dec_irq;
+generate if(MSU) begin : g_msu
+xc_msubox msubox (
+  .clk(clk2), .rst(rst2_all),
+  .sel(dec_sel), .we(dec_we), .addr(reg_addr[11:2]), .wdata(reg_wdata), .rdata(dec_rdata), .ready(dec_ready),
+  .msu_we(msu_we), .msu_addr(msu_addr), .msu_data(msu_data), .msu_status(msu_status)
+);
+assign dec_irq = 1'b0;
+assign mcu_status = 2'b00;
+assign mcu_len = 11'd0;
+assign mcu_pkt_data = 8'h00;
+end else begin : g_dec
 xc_decbox decbox (
   .clk(clk2), .rst(rst2_all),
   .sel(dec_sel), .we(dec_we), .addr(reg_addr[11:2]), .wdata(reg_wdata), .rdata(dec_rdata), .ready(dec_ready), .irq(dec_irq),
@@ -168,6 +186,10 @@ xc_decbox decbox (
   .mcu_pcm_start(mcu_pcm_start), .mcu_pcm_wr(mcu_pcm_wr), .mcu_pcm_data(mcu_pcm_data),
   .mcu_done(mcu_done), .mcu_ret(mcu_ret), .mcu_range(mcu_range), .mcu_ack_reset(mcu_ack_reset)
 );
+assign msu_we = 1'b0;
+assign msu_addr = 3'd0;
+assign msu_data = 8'd0;
+end endgenerate
 always @(posedge clk2) if(dec_irq) dec_irq_tog <= ~dec_irq_tog;
 
 //------------------------------------------------------------------------------

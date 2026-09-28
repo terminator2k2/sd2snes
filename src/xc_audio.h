@@ -29,5 +29,6 @@ extern uint32_t xc_audio_packets, xc_audio_errors;
 /* xc_load.c: loading a 128 KB kernel ROM builds the image from /sd2snes/xenocrisis_rp2040.bin + /sd2snes/xc_soc.bin */
 const char* xc_load_image(void);   /* NULL when done, else the name of the missing / wrong file */
 void xc_load_dump_save(void);      /* no .srm: seed the save RAM from the dump's save area */
+int xc_msu_pack(const uint8_t* filename); /* <rom>.msu and fpga_xc_msu present: use the MSU-1 core */
 
 #endif

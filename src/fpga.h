@@ -79,8 +79,9 @@ extern uint8_t fpga_boot_led;
    romprops.fpga_conf, so every "is this the base core" test still sees the base core. */
 #define FPGA_BASEX ((const uint8_t*)"/sd2snes/fpga_basex." FPGA_CONF_EXT)
 
-/* Xeno Crisis RP2040 coprocessor core */
+/* Xeno Crisis RP2040 coprocessor cores */
 #define FPGA_XC ((const uint8_t*)"/sd2snes/fpga_xc." FPGA_CONF_EXT)
+#define FPGA_XC_MSU ((const uint8_t*)"/sd2snes/fpga_xc_msu." FPGA_CONF_EXT)
 
 #define FPGA_DSP ((const uint8_t*)"/sd2snes/fpga_dsp." FPGA_CONF_EXT)
 /* Dedicated ST011 core (verilog/sd2snes_st0011): the uPD96050's 16384-word

@@ -41,31 +41,32 @@
 
 int msu1_check(uint8_t*);
 int msu1_loop(void);
-void msu_dac_hold(void);      /* pause the DAC around a blocking op (no-op if idle) */
-void msu_dac_release(void);   /* resume it (no-op if idle) */
 
-/* Menu navigation sound effects via the MSU-1 DAC, one-shot (see msu1.c). */
-void menu_sfx_play(const char *filename); /* play one MSU-1 PCM once; silent if absent/bad */
-void menu_sfx_pump(void);                 /* top up the DAC; call from menu-owning loops */
-void menu_sfx_stop(void);                 /* pause + close (keeps FEAT_MSU1 for instant retrigger) */
-void menu_sfx_shutdown(void);             /* stop + drop FEAT_MSU1 (game load / console reset) */
-int  menu_sfx_active(void);               /* nonzero while an effect is playing */
-void menu_sfx_silence(void);              /* drain the DAC ring after a SNES reset (see msu1.c) */
-void menu_sfx_forget(void);               /* drop the PSRAM preload cache + rewind its allocator */
+void msu_dac_hold(void);
+void msu_dac_release(void);
 
-/* Looping background music via the same DAC (FMV info-screen audio): like menu_sfx but
-   no one-shot deadline -- loops the whole clip from sample 0 until menu_music_stop. Shares
-   the DAC, so the caller suppresses nav SFX while it plays (snes.c). Pumped by the same
-   menu_sfx_pump(). */
-int  menu_music_play(const char *filename); /* 0xA0 playing / 0x01 open-fail / 0x02 bad-magic */
+/* Menu navigation sound effects via the MSU-1 DAC. */
+void menu_sfx_play(const char *filename);
+void menu_sfx_pump(void);
+void menu_sfx_stop(void);
+void menu_sfx_shutdown(void);
+int  menu_sfx_active(void);
+void menu_sfx_silence(void);
+void menu_sfx_forget(void);
+
+/* Looping background music via the same DAC. */
+int  menu_music_play(const char *filename);
 void menu_music_stop(void);
-int  menu_music_active(void);             /* nonzero while a looping clip is playing */
-void menu_music_lock(int locked);         /* claim the DAC: the FMV stop paths leave it alone */
-int  menu_music_locked(void);             /* nonzero while somebody holds that claim */
-uint32_t menu_music_samples(void);        /* DAC samples since loop start (FMV frame clock) */
-void menu_music_pause(int paused);        /* freeze/unfreeze the DAC, keeping the clip open */
-uint32_t menu_music_tell(void);           /* byte read position in the clip (progress display) */
-uint32_t menu_music_size(void);           /* clip size in bytes, header included */
+int  menu_music_active(void);
+void menu_music_lock(int locked);
+int  menu_music_locked(void);
+uint32_t menu_music_samples(void);
+void menu_music_pause(int paused);
+uint32_t menu_music_tell(void);
+uint32_t menu_music_size(void);
+
+/* STTNG: MSU-1 audio servicing for Xeno Crisis. */
+void msu1_audio_service(void);
 
 uint8_t msu_readbyte(uint16_t addr);
 uint16_t msu_readshort(uint16_t addr);

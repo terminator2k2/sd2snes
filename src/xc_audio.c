@@ -28,6 +28,9 @@
 #include "config.h"
 #include "fpga_spi.h"
 #include "xc_audio.h"
+#include "msu1.h"
+#include "smc.h"
+extern snes_romprops_t romprops;
 #ifdef CONFIG_MK3_STM32
 #include "opus.h"
 #endif
@@ -156,12 +159,12 @@ static int format_stats(char* b, int size)
 	d[6] = w[6];                                             /* longest tick: reset by each snapshot */
 	memcpy(xs.perf, w, sizeof(w));
 	int n = snprintf(b, size,
-		"MCU decode service: %lu packets, %lu errors, mixer already waiting for %lu\r\n"
-		"  service per packet (us): avg %lu, max %lu, over 20 ms %lu (with the poll gap before)\r\n"
-		"  decode alone (us): avg %lu, max %lu\r\n"
-		"  poll gaps: max %lu us, over 5 ms %lu, over 20 ms %lu\r\n"
-		"FPGA, since the previous log: %lu soft CPU cycles; stalled on fetch %lu%%, flash data %lu%%, RAM data %lu%%\r\n"
-		"  game ticks %lu, longer than a frame %lu, longest %lu us (at 40.25 MHz); window underruns %lu\r\n",
+		"MCU decode: %lu packets, %lu errors, mixer waited %lu\r\n"
+		" service us (incl. poll gap): avg %lu max %lu, >20ms %lu\r\n"
+		" decode us: avg %lu max %lu\r\n"
+		" poll gaps: max %lu us, >5ms %lu, >20ms %lu\r\n"
+		"FPGA since last log: %lu cycles; stalls fetch %lu%% flash %lu%% RAM %lu%%\r\n"
+		" ticks %lu, >1 frame %lu, longest %lu us; window underruns %lu\r\n",
 		(unsigned long)xs.jobs, (unsigned long)xc_audio_errors, (unsigned long)xs.waiting,
 		(unsigned long)cyc_us(xs.svc_sum / j), (unsigned long)cyc_us(xs.svc_max), (unsigned long)xs.svc_over_20ms,
 		(unsigned long)cyc_us(xs.dec_sum / j), (unsigned long)cyc_us(xs.dec_max),
@@ -180,7 +183,7 @@ static char stats_buf[1024] IN_AHBRAM;
 static void write_log(const char* why)
 {
 	uint32_t t0 = XC_CYCLES();
-	int n = snprintf(stats_buf, sizeof(stats_buf), "[%s, log #%lu, previous write %lu ms]\r\n", why,
+	int n = snprintf(stats_buf, sizeof(stats_buf), "[%s #%lu, last write %lu ms]\r\n", why,
 		(unsigned long)++log_writes, (unsigned long)log_ms);
 	if(n < 0 || n >= (int)sizeof(stats_buf)) n = 0;
 	n += format_stats(stats_buf + n, sizeof(stats_buf) - n);
@@ -194,7 +197,7 @@ static void write_log(const char* why)
 		FRESULT rc = f_close(&f);
 		if(r == FR_OK) r = rc;
 	}
-	if(r != FR_OK) printf("xcaudio.txt: write failed (FatFs error %d)\n", (int)r);
+	if(r != FR_OK) printf("xcaudio.txt: error %d\n", (int)r);
 	log_ms = (XC_CYCLES() - t0) / (XC_CYC_PER_US * 1000u);
 #else
 	(void)n;
@@ -235,7 +238,7 @@ static void check_soc(void)
 	FPGA_DESELECT();
 	if((st & 1) && !halt_reported) {
 		halt_reported = 1;
-		printf("Xeno Crisis soft CPU halted: code %08lx at %08lx\n", code, addr);
+		printf("XC halted: %08lx at %08lx\n", code, addr);
 	}
 }
 
@@ -349,6 +352,7 @@ void xc_audio_poll(void)
 /* for long MCU jobs (SRAM CRC): serve a waiting job; the caller has deselected the FPGA */
 void xc_audio_service(void)
 {
+	if(romprops.has_msu1) { msu1_audio_service(); return; }   /* MSU-1 core: the MSU-1 audio buffer instead */
 	if(!active) return;
 	in_service = 1;
 	xc_audio_poll();

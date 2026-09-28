@@ -308,15 +308,22 @@ sd_dma snes_sd_dma(
 
 assign SD_DMA_TO_ROM = (SD_DMA_STATUS && (SD_DMA_TGT == 2'b00));
 
-// MSU-1 and the audio DAC are left out of this core (Xeno Crisis uses neither; they cost ~2,100 LEs and
-// 20 M9K blocks). Define XC_WITH_MSU to put them back.
-`ifdef XC_WITH_MSU
-dac snes_dac(
+// MSU-1 and the audio DAC: only in the Xeno Crisis MSU-1 core (fpga_xc_msu.bi3, `define XC_MSU; the
+// fpga_xc_msu revision of this project). There the music comes from an MSU-1 pack: the soft CPU writes
+// the MSU-1 registers (xc_msubox in xc_top), the SNES does not see them. msu.v is audio-only (no 16 KB data
+// buffer), xc_dac.v is dac.v with linear interpolation instead of the CIC (fits next to the soft CPU).
+wire       xc_msu_we;
+wire [2:0] xc_msu_addr;
+wire [7:0] xc_msu_data;
+wire [7:0] xc_msu_status;
+`ifdef XC_MSU
+xc_dac snes_dac(
   .clkin(CLK2),
   .sysclk(SNES_SYSCLK),
   .mclk_out(DAC_MCLK),
   .lrck_out(DAC_LRCK),
   .sdout(DAC_SDOUT),
+  .sclk_out(),
   .we(SD_DMA_TGT==2'b01 ? SD_DMA_SRAM_WE : 1'b1),
   .pgm_address(dac_addr),
   .pgm_data(SD_DMA_SRAM_DATA),
@@ -332,17 +339,18 @@ dac snes_dac(
 
 msu snes_msu (
   .clkin(CLK2),
-  .enable(msu_enable),
+  .enable(1'b1),
   .pgm_address(msu_write_addr),
   .pgm_data(SD_DMA_SRAM_DATA),
-  .pgm_we(SD_DMA_TGT==2'b10 ? SD_DMA_SRAM_WE : 1'b1),
-  .reg_addr(SNES_ADDR[2:0]),
-  .reg_data_in(MSU_SNES_DATA_IN),
-  .reg_data_out(MSU_SNES_DATA_OUT),
-  .reg_oe_falling(SNES_RD_start),
-  .reg_oe_rising(SNES_RD_end),
-  .reg_we_rising(SNES_WR_end),
+  .pgm_we(1'b1),
+  .reg_addr(xc_msu_addr),
+  .reg_data_in(xc_msu_data),
+  .reg_data_out(),
+  .reg_oe_falling(1'b0),
+  .reg_oe_rising(1'b0),
+  .reg_we_rising(xc_msu_we),
   .status_out(msu_status_out),
+  .reg_status(xc_msu_status),
   .volume_out(msu_volumerq_out),
   .volume_latch_out(msu_volume_latch_out),
   .addr_out(msu_addressrq_out),
@@ -352,12 +360,13 @@ msu snes_msu (
   .status_reset_we(msu_status_reset_we),
   .msu_address_ext(msu_ptr_addr),
   .msu_address_ext_write(msu_addr_reset),
-  .DBG_msu_reg_oe_rising(DBG_msu_reg_oe_rising),
-  .DBG_msu_reg_oe_falling(DBG_msu_reg_oe_falling),
-  .DBG_msu_reg_we_rising(DBG_msu_reg_we_rising),
-  .DBG_msu_address(DBG_msu_address),
-  .DBG_msu_address_ext_write_rising(DBG_msu_address_ext_write_rising)
+  .DBG_msu_reg_oe_rising(),
+  .DBG_msu_reg_oe_falling(),
+  .DBG_msu_reg_we_rising(),
+  .DBG_msu_address(),
+  .DBG_msu_address_ext_write_rising()
 );
+assign MSU_SNES_DATA_OUT = 8'h00;
 `else
 assign DAC_MCLK = 1'b0;
 assign DAC_LRCK = 1'b0;
@@ -368,6 +377,7 @@ assign MSU_SNES_DATA_OUT = 8'h00;
 assign msu_volumerq_out = 8'h00;
 assign msu_addressrq_out = 32'h0;
 assign msu_trackrq_out = 16'h0;
+assign xc_msu_status = 8'h00;
 `endif
 
 spi snes_spi(
@@ -415,7 +425,11 @@ wire [255:0] xc_perf;
 
 // soft CPU clock 40.25 MHz (must match the PLL's clk1); caches: D$ 2^DIDX sets, I$ 2^IIDX sets (x 2 ways x 32 B)
 // = 16 KB each. If Quartus misses timing on clk[1], try IIDX 7 (8 KB I$: same M9K count as a 4 KB one).
-xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(1), .DIDX(8), .IIDX(8)) snes_xc (
+`ifdef XC_MSU
+xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(1), .DIDX(8), .IIDX(8), .MSU(1)) snes_xc (
+`else
+xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(1), .DIDX(8), .IIDX(8), .MSU(0)) snes_xc (
+`endif
   .clk2(CLK2),
   .clk_soc(CLK_SOC),
   .rst2(SNES_DEADr),
@@ -450,6 +464,10 @@ xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(1), .DIDX(8), .IIDX(8)) snes
   .mcu_ret(xca_ret),
   .mcu_range(xca_range),
   .mcu_ack_reset(xca_ack_reset),
+  .msu_we(xc_msu_we),
+  .msu_addr(xc_msu_addr),
+  .msu_data(xc_msu_data),
+  .msu_status(xc_msu_status),
   .soc_running(xc_running),
   .soc_halted(xc_halted),
   .soc_halt_code(xc_halt_code),

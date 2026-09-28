@@ -31,6 +31,7 @@ module msu(
   input reg_oe_rising,
   input reg_we_rising,
   output [7:0] status_out,
+  output [7:0] reg_status,         // the $2000 status byte (Xeno Crisis MSU-1 core: read by the soft CPU)
   output [7:0] volume_out,
   output volume_latch_out,
   output [31:0] addr_out,
@@ -52,6 +53,7 @@ module msu(
 
 `ifndef MSU
 assign reg_data_out = 0;
+assign reg_status = 0;
 
 assign status_out = 0;
 assign volume_out = 0;
@@ -68,7 +70,7 @@ assign DBG_msu_address_ext_write_rising = 0;
 reg msu_addr_inc_arm = 0;
 
 reg [1:0] status_reset_we_r;
-always @(posedge clkin) status_reset_we_r = {status_reset_we_r[0], status_reset_we};
+always @(posedge clkin) status_reset_we_r <= {status_reset_we_r[0], status_reset_we};
 wire status_reset_en = (status_reset_we_r == 2'b01);
 
 reg [13:0] msu_address_r;
@@ -113,6 +115,10 @@ initial begin
   track_out_r = 16'h0000;
   data_start_r = 1'b0;
   audio_start_r = 1'b0;
+  audio_status_r = 2'b00;
+  audio_ctrl_r = 3'b000;
+  ctrl_start_r = 1'b0;
+  volume_start_r = 1'b0;
 end
 
 assign DBG_msu_address = msu_address;
@@ -130,6 +136,12 @@ assign status_out = {msu_address_r[13], // 7
 
 initial msu_address_r = 14'h1234;
 
+assign reg_status = {data_busy_r, audio_busy_r, audio_status_r, audio_error_r, 3'b010};
+
+`ifdef XC_MSU
+// Xeno Crisis MSU-1 core: audio only (the game has no MSU-1 data), no 16 KB data buffer
+assign msu_data = 8'h00;
+`else
 `ifdef MK2
 msu_databuf snes_msu_databuf (
   .clka(clkin),
@@ -150,6 +162,7 @@ msu_databuf snes_msu_databuf (
   .rdaddress(msu_address), // Bus [13 : 0]
   .q(msu_data)
 ); // Bus [7 : 0]
+`endif
 `endif
 reg [7:0] data_out_r;
 assign reg_data_out = data_out_r;

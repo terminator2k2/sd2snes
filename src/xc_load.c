@@ -31,6 +31,7 @@
 #include "smc.h"
 #include "memory.h"
 #include "xc_audio.h"
+#include "fpga.h"
 
 #define XC_FLASH_FILE  "/sd2snes/xenocrisis_rp2040.bin"
 #define XC_SOC_FILE    "/sd2snes/xc_soc.bin"
@@ -74,12 +75,12 @@ const char* xc_load_image(void)
   file_open((const uint8_t*)XC_FLASH_FILE, FA_READ);
   uint32_t size = file_handle.fsize;
   file_close();
-  printf("Xeno Crisis: %s (%lu bytes)\n", XC_FLASH_FILE, size);
+  printf("XC: %s %lu\n", XC_FLASH_FILE, size);
   if(file_res || size != 0x1000000u) return XC_FLASH_FILE;
   if(!offload(XC_FLASH_FILE, 0x020000u, 0xCE0000u, 0x020000u)) return XC_FLASH_FILE;
   if(!offload(XC_FLASH_FILE, 0x000000u, 0x020000u, 0xD00000u)) return XC_FLASH_FILE;
   if(sram_readshort(psram_of(XC_LAUNCH_CORE1)) != 0x4905) {
-    printf("Xeno Crisis: unexpected RP2040 firmware build\n");
+    printf("XC: unknown RP2040 build\n");
     return XC_FLASH_FILE;
   }
 
@@ -116,9 +117,32 @@ const char* xc_load_image(void)
   }
   file_close();
   if(file_res) return XC_SOC_FILE;
-  printf("Xeno Crisis: image built, %lu functions redirected\n", count);
+  printf("XC: image ok, %lu patches\n", count);
   from_dump = 1;
   return NULL;
+}
+
+/* an MSU-1 pack next to the ROM (<rom>.msu, as msu1_check() looks for it) and the MSU-1 core on the card */
+int xc_msu_pack(const uint8_t* filename)
+{
+  char name[260];
+  const char* dot = strrchr((const char*)filename, '.');
+  size_t n = dot ? (size_t)(dot - (const char*)filename) : strlen((const char*)filename);
+  if(n > sizeof(name) - 5) return 0;
+  memcpy(name, filename, n);
+  strcpy(name + n, ".msu");
+  file_open((const uint8_t*)name, FA_READ);
+  file_close();
+  if(file_res) { file_res = FR_OK; return 0; }
+  file_open(FPGA_XC_MSU, FA_READ);
+  file_close();
+  if(file_res) {
+    printf("XC: no %s\n", FPGA_XC_MSU);
+    file_res = FR_OK;
+    return 0;
+  }
+  printf("XC: MSU-1 %s\n", name);
+  return 1;
 }
 
 /* no .srm yet: start from the save area of the dump (the saves made on the cartridge) */
@@ -131,5 +155,5 @@ void xc_load_dump_save(void)
     sram_writeblock(file_buf, SRAM_SAVE_ADDR + off, 512);
   }
   file_close();
-  printf("Xeno Crisis: no .srm, save area taken from the RP2040 dump\n");
+  printf("XC: save from dump\n");
 }

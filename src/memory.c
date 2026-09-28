@@ -750,6 +750,7 @@ static void load_bs_pack_slot(const load_ctx_t *c) {
       }
     }
   }
+
 }
 
 /* Everything the FPGA has to know before the SNES comes out of reset: the $213F
@@ -761,6 +762,7 @@ static void load_set_features(const load_ctx_t *c) {
   printf("r213fen=%d is_u16=%d filename=%s\n", cfg_is_r213f_override_enabled(), STS.is_u16, filename);
   if(cfg_is_r213f_override_enabled() && !is_menu && !STS.is_u16) {
     romprops.fpga_features |= FEAT_213F; /* e.g. for general consoles */
+
   }
   fpga_set_213f(romprops.region);
 //  fpga_set_features(romprops.fpga_features);
@@ -916,11 +918,11 @@ static void load_setup_masks(load_ctx_t *c) {
     rammask = romprops.ramsize_bytes - 1;
   }
   rommask = romprops.romsize_bytes - 1;
-  
+
   if (romprops.has_combo) {
     ramslot = sram_readbyte((romprops.mapper_id == 0 || romprops.mapper_id == 2) ? 0xFFDA : 0x7FDA);
   }
-  
+
   printf("ramsize=%x ramslot=%hx rammask=%lx\nromsize=%x rommask=%lx\n", romprops.header.ramsize, ramslot, rammask, romprops.header.romsize, rommask);
 
   /* SGB setup romprops and load SRAM */
@@ -1344,7 +1346,7 @@ static uint32_t load_identify(load_ctx_t *c) {
     romprops.offset += romslot << 20;
     printf(" romslot=0x%lx", romslot);
     printf(" offset=0x%lx", romprops.offset);
-    
+
     // force has_combo since only slot 00 has the matching carttype
     romprops.has_combo = 1;
     printf(" OK.\n");
@@ -1518,6 +1520,12 @@ static uint32_t load_check_prereqs(load_ctx_t *c) {
 /* Swap the FPGA core in for this game.  The SNES is parked in game_handshake and
    the menu SFX teardown is deliberately deferred to here -- see inside. */
 static void load_reconfigure_fpga(const load_ctx_t *c) {
+#ifdef CONFIG_MK3
+  /* Select the Xeno Crisis MSU-1 FPGA core when a pack exists. */
+  if(romprops.has_xc) {
+    romprops.fpga_conf = xc_msu_pack(c->filename) ? FPGA_XC_MSU : FPGA_XC;
+  }
+#endif
 #if RECORE_PSRAM_KEEP
   uint32_t base_addr = c->base_addr;   /* only the fingerprint check below reads it */
 #endif
@@ -1602,16 +1610,20 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
     fpga_set_features(c.fpga_features_preload);
     printf("OK.\n");
   }
-  /* Gated at the call site: this is the difference between a menu load and a game
+/* Gated at the call site: this is the difference between a menu load and a game
      load, and between pass 1 and the recore reload. */
   if(!c.is_menu && (flags & LOADROM_WAIT_SNES) && !load_check_prereqs(&c)) return 0;
+
   if(flags & LOADROM_WAIT_SNES) {
     printf("Setting cmd=0x55...");
     snes_set_snes_cmd(0x55);
     printf("OK.\n");
   }
+
   load_reconfigure_fpga(&c);
   load_stream(&c);
+
+  printf("done\n");
 
 #ifdef CONFIG_MK3
   /* Xeno Crisis: build the complete image from the 128 KB SNES ROM.
@@ -1686,6 +1698,17 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
     romprops.fpga_features |= FEAT_MSU1;
     romprops.has_msu1 = 1;
   }
+#ifdef CONFIG_MK3
+  if(romprops.has_xc) {
+    /* The Xeno Crisis soft CPU drives MSU-1, not the SNES. */
+    romprops.fpga_features &= ~FEAT_MSU1;
+
+    /* Without the Xeno MSU FPGA core, disable MSU-1 entirely. */
+    if(romprops.fpga_conf != FPGA_XC_MSU) {
+      romprops.has_msu1 = 0;
+    }
+  }
+#endif
   printf("done\n");
 
   load_set_features(&c);
@@ -1699,10 +1722,10 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   if (romprops.has_combo) {
     static uint32_t combo_srambase = 0;
     static uint32_t combo_sramsize_bytes = 0;
-  
+
     // set version number
     snescmd_writebyte(COMBO_VERSION, SNESCMD_COMBO_VERSION);
-  
+
     if (flags & LOADROM_WITH_COMBO) {
       // restore proper bounds
       romprops.srambase = combo_srambase;
