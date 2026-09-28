@@ -416,8 +416,11 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
         props->dsp_fw = DSPFW_ST0018;
         props->fpga_conf = FPGA_ST0018;
       }
-      /* Xeno Crisis (Bitmap Bureau): RP2040 coprocessor */
-#ifdef CONFIG_MK3_STM32
+/* Xeno Crisis (Bitmap Bureau): RP2040 coprocessor.
+         Both MK3 MCU types are supported:
+         STM32F401 supports Opus music decoding.
+         LPC1756 supports gameplay and sound effects without Opus music. */
+#ifdef CONFIG_MK3
       else if (header->map == 0x30 && header->carttype == 0x63
                && header->maker[0] == 'B' && header->maker[1] == 'M'
                && !memcmp(header->gamecode, "XCRI", 4)) {

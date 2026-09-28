@@ -98,10 +98,14 @@ SRC += spc7110rtc.c
 # Sufami Turbo Slot B autosave.  Linked into every config.
 SRC += sufami.c
 
-# Xeno Crisis (sd2snes_xc core): Opus decode service, mk3 (STM32F401) only.
-# Build the decoder library first: xc_opus/build.sh <opus-1.3.1 source dir>
-ifeq ($(CONFIG_MK3_STM32),y)
+# Xeno Crisis (sd2snes_xc core): decode service for the soft CPU, both mk3 MCUs.
+# STM32F401 (firmware.stm): with the Opus decoder; build the library first: xc_opus/build.sh <opus-1.3.1 source dir>
+# LPC1756 (firmware.im3): no Opus (the decoder needs ~26.5 KB of contiguous RAM plus ~11 KB of stack; the LPC1756
+# has 16 KB + 16 KB, mostly used): music packets are answered as "not decoded", sound effects play normally.
+ifeq ($(CONFIG_MK3),y)
 SRC += xc_audio.c
+endif
+ifeq ($(CONFIG_MK3_STM32),y)
 XC_OPUS_DIR ?= xc_opus
 XC_OPUS_LIB = $(XC_OPUS_DIR)/libopus_xc.a
 endif

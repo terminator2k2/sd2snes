@@ -1,5 +1,12 @@
 /* Xeno Crisis on sd2snes: Opus decode service on the MCU (see xc_audio.h).
  *
+ * mk3 with STM32F401 (firmware.stm, CONFIG_MK3_STM32): decodes the music packets the soft CPU's mixer submits.
+ * mk3 with LPC1756 (firmware.im3): the Opus decoder does not fit (it needs ~26.5 KB of contiguous RAM plus ~11 KB
+ * of stack; the LPC1756 has 16 KB of main RAM and 16 KB of AHB RAM, and the stock firmware leaves ~5 KB and
+ * ~7 KB of them). There every job is answered at once as "nothing decoded" (ret 0, final range 0): the mixer
+ * treats the track as ended (as the RP2040 firmware does with corrupted music data) and keeps mixing the sound
+ * effects, which play normally. The music is silent.
+ *
  * Bit-exactness: the decoder must produce exactly what the RP2040 firmware's libopus 1.3.1 produces.
  * Build libopus with FIXED_POINT, DISABLE_FLOAT_API, OPUS_FAST_INT64=0, the SILK ARMv5E macros
  * (OPUS_ARM_INLINE_ASM/EDSP/MEDIA for silk/ only) and M4_EXACT (celt/fixed_generic.h: 64-bit forms of
@@ -14,14 +21,18 @@
 #include "config.h"
 #include "fpga_spi.h"
 #include "xc_audio.h"
+#ifdef CONFIG_MK3_STM32
 #include "opus.h"
+#endif
 #include "uart.h"
 
+#ifdef CONFIG_MK3_STM32
 /* opus_decoder_get_size(2) is 26,496 bytes for this build; keep a margin */
 static uint32_t decoder_mem[27136 / 4];
 static uint8_t packet[1536];
 static int16_t pcm[480 * 2];
 static int decoder_ok;
+#endif
 uint32_t xc_audio_packets, xc_audio_errors;
 static uint32_t status_polls;
 static uint8_t halt_reported;
@@ -34,10 +45,12 @@ static uint8_t halt_reported;
  *    latches a written byte a few CLK2 cycles after the byte ends).
  *  - reads: FPGA_RX_BYTE() waits for the bus to go idle before each byte (as get_msu_pointer() does);
  *  - writes: FPGA_TX_BYTE() + FPGA_TX_SYNC() leaves the same gap after each byte. */
+#ifdef CONFIG_MK3_STM32
 static void xc_rx(uint8_t* dst, uint32_t n)
 {
 	while(n--) *dst++ = FPGA_RX_BYTE();
 }
+#endif
 
 static void xc_tx(uint8_t b)
 {
@@ -56,8 +69,10 @@ void xc_run(uint8_t run)
 
 void xc_audio_init(void)
 {
+#ifdef CONFIG_MK3_STM32
 	decoder_ok = opus_decoder_get_size(2) <= (int)sizeof(decoder_mem)
 		&& opus_decoder_init((OpusDecoder*)decoder_mem, 24000, 2) == OPUS_OK;
+#endif
 	xc_audio_packets = 0;
 	xc_audio_errors = 0;
 	status_polls = 0;
@@ -95,6 +110,17 @@ static void check_soc(void)
 	}
 }
 
+/* the job's result: ret (opus_decode() result) and final range; raises the soft CPU's decode interrupt */
+static void send_done(int32_t ret, uint32_t range)
+{
+	FPGA_SELECT();
+	xc_tx(FPGA_CMD_XCA_DONE);
+	for(int i = 0; i < 4; i++) xc_tx((uint8_t)((uint32_t)ret >> (8 * i)));
+	for(int i = 0; i < 4; i++) xc_tx((uint8_t)(range >> (8 * i)));
+	xc_tx(0x00); /* flop reset */
+	FPGA_DESELECT();
+}
+
 void xc_audio_poll(void)
 {
 	uint16_t len;
@@ -105,7 +131,9 @@ void xc_audio_poll(void)
 	uint8_t st = read_status(&len);
 
 	if(st & XCA_ST_RESET) {
+#ifdef CONFIG_MK3_STM32
 		decoder_ok = opus_decoder_init((OpusDecoder*)decoder_mem, 24000, 2) == OPUS_OK;
+#endif
 		FPGA_SELECT();
 		xc_tx(FPGA_CMD_XCA_ACKRESET);
 		FPGA_DESELECT();
@@ -115,6 +143,12 @@ void xc_audio_poll(void)
 		return;
 	}
 
+#ifndef CONFIG_MK3_STM32
+	/* LPC1756: no decoder. "Nothing decoded": the mixer ends the track and keeps mixing the sound effects. */
+	(void)len;
+	xc_audio_packets++;
+	send_done(0, 0);
+#else
 	if(len > sizeof(packet)) {
 		len = sizeof(packet);
 	}
@@ -146,10 +180,6 @@ void xc_audio_poll(void)
 	}
 	FPGA_DESELECT();
 
-	FPGA_SELECT();
-	xc_tx(FPGA_CMD_XCA_DONE);
-	for(int i = 0; i < 4; i++) xc_tx((uint8_t)((uint32_t)ret >> (8 * i)));
-	for(int i = 0; i < 4; i++) xc_tx((uint8_t)(range >> (8 * i)));
-	xc_tx(0x00); /* flop reset */
-	FPGA_DESELECT();
+	send_done(ret, range);
+#endif
 }

@@ -520,15 +520,15 @@ int main(void) {
     wd_loop_enter();
 #endif
 
-#ifdef CONFIG_MK3_STM32
+#ifdef CONFIG_MK3
     if(romprops.has_xc) xc_audio_init();
 #endif
 
     while(LOOP_FPGA_TEST() == FPGA_TEST_TOKEN) {
       cli_entrycheck();
 
-#ifdef CONFIG_MK3_STM32
-      if(romprops.has_xc) xc_audio_poll();   /* Xeno Crisis: Opus decode service */
+#ifdef CONFIG_MK3
+      if(romprops.has_xc) xc_audio_poll();   /* Xeno Crisis: decode service (Opus on STM32 only) */
 #endif
 
       //usb upload/boot/lock

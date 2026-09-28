@@ -1771,8 +1771,8 @@ void init(uint8_t *filename) {
      savestate_program().  Probed on hardware: with the body live, 5/5 clean
      resumes and the reset-loop path never fires during a resume. */
   if (CFG.reset_patch) snescmd_writebyte(0, SNESCMD_RESET_HOOK+1);
-#ifdef CONFIG_MK3_STM32
-  /* Xeno Crisis: start the soft CPU with the SNES */
+#ifdef CONFIG_MK3
+  /* Xeno Crisis: the image and save are loaded; start the soft CPU with the SNES */
   if (romprops.has_xc) xc_run(1);
 #endif
 
