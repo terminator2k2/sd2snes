@@ -59,6 +59,7 @@ static uint8_t halt_reported;
 static uint8_t active;
 static uint8_t in_service;     /* xc_audio_poll() called from inside another MCU job (CRC, save) */
 static uint32_t log_writes;
+static uint32_t log_ms;        /* time the previous log write took */
 
 static struct {
 	uint32_t last_poll;          /* cycle count at the last poll */
@@ -115,6 +116,7 @@ void xc_audio_init(void)
 	halt_reported = 0;
 	memset(&xs, 0, sizeof(xs));
 	log_writes = 0;
+	log_ms = 0;
 	in_service = 0;
 #ifdef XC_CYCLES_ON
 	XC_CYCLES_ON();
@@ -185,7 +187,9 @@ static char stats_buf[1024] IN_AHBRAM;
 /* statistics to the UART and to /sd2snes/xcaudio.txt (rewritten each time) */
 static void write_log(const char* why)
 {
-	int n = snprintf(stats_buf, sizeof(stats_buf), "[%s, log #%lu]\r\n", why, (unsigned long)++log_writes);
+	uint32_t t0 = XC_CYCLES();
+	int n = snprintf(stats_buf, sizeof(stats_buf), "[%s, log #%lu, previous write %lu ms]\r\n", why,
+		(unsigned long)++log_writes, (unsigned long)log_ms);
 	if(n < 0 || n >= (int)sizeof(stats_buf)) n = 0;
 	n += format_stats(stats_buf + n, sizeof(stats_buf) - n);
 	printf("%s", stats_buf);
@@ -199,6 +203,7 @@ static void write_log(const char* why)
 		if(r == FR_OK) r = rc;
 	}
 	if(r != FR_OK) printf("xcaudio.txt: write failed (FatFs error %d)\n", (int)r);
+	log_ms = (XC_CYCLES() - t0) / (XC_CYC_PER_US * 1000u);
 #else
 	(void)n;
 #endif

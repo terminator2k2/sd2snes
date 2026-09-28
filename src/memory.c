@@ -2379,7 +2379,13 @@ uint8_t sram_reliable() {
   uint16_t score=0;
   uint32_t val;
   uint8_t result = 0;
-  for(uint16_t i = 0; i < SRAM_RELIABILITY_SCORE; i++) {
+  uint16_t n = SRAM_RELIABILITY_SCORE;
+#ifdef CONFIG_MK3
+  /* Xeno Crisis: 256 reads take ~12 ms here, because the soft CPU has priority on the ROM bus, and they take
+     bus slots from its flash fetches meanwhile (the game slows down). A few reads still catch a dead PSRAM. */
+  if(romprops.has_xc) n = 4;
+#endif
+  for(uint16_t i = 0; i < n; i++) {
     val=sram_readlong(SRAM_SCRATCHPAD);
     if(val==0x12345678) {
       score++;
@@ -2390,7 +2396,7 @@ uint8_t sram_reliable() {
       printf("i=%d val=%08lX\n", i, val);
     }
   }
-  if(score<SRAM_RELIABILITY_SCORE) {
+  if(score<n) {
     result = 0;
 /* dprintf("score=%d\n", score); */
   } else {
