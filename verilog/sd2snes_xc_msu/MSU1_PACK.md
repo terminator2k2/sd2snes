@@ -21,28 +21,28 @@ Track n is the game's music stream n. The length is the game's own version, for 
 |---|---|---|---|
 | 1 | MUSIC_0_INTRO_VOICED | 0:31.6 | Played once (boot intro). Soundtrack: "Intro". |
 | 2 | MUSIC_10_ALARM | 0:05.4 | |
-| 3 | MUSIC_1_TITLE | 0:36.4 | Loops. |
-| 4 | MUSIC_2_INGAME_0_INTRO | 0:02.8 | Intro of 5. |
-| 5 | MUSIC_2_INGAME_0_LOOP | 1:47.0 | Loops. |
-| 6 | MUSIC_2_INGAME_1 | 2:39.8 | |
-| 7 | MUSIC_2_INGAME_2 | 2:08.6 | |
-| 8 | MUSIC_2_INGAME_3_INTRO | 0:10.6 | Intro of 9. |
-| 9 | MUSIC_2_INGAME_3_LOOP | 1:57.4 | |
-| 10 | MUSIC_2_INGAME_4_INTRO | 0:22.8 | Intro of 11. |
-| 11 | MUSIC_2_INGAME_4_LOOP | 1:21.4 | |
-| 12 | MUSIC_2_INGAME_5_INTRO | 0:08.2 | Intro of 13. |
-| 13 | MUSIC_2_INGAME_5_LOOP | 1:56.0 | |
-| 14 | MUSIC_2_INGAME_6_INTRO | 0:32.0 | Intro of 15. |
-| 15 | MUSIC_2_INGAME_6_LOOP | 1:48.6 | |
-| 16 | MUSIC_3_BOSS_0 | 0:57.4 | |
-| 17 | MUSIC_3_BOSS_1 | 0:35.8 | |
-| 18 | MUSIC_3_BOSS_2_INTRO | 0:00.8 | Intro of 19. |
-| 19 | MUSIC_3_BOSS_2_LOOP | 0:40.8 | |
-| 20 | MUSIC_3_BOSS_3 | 0:45.2 | |
+| 3 | MUSIC_1_TITLE | 0:36.4 | Loops. Soundtrack: "Title". |
+| 4 | MUSIC_2_INGAME_0_INTRO | 0:02.8 | Intro of 5. Soundtrack: "Perimeter (Area 1)" (its intro). |
+| 5 | MUSIC_2_INGAME_0_LOOP | 1:47.0 | Loops. Soundtrack: "Perimeter (Area 1)" (its loop). |
+| 6 | MUSIC_2_INGAME_1 | 2:39.8 | Soundtrack: "Facility (Area 2)". |
+| 7 | MUSIC_2_INGAME_2 | 2:08.6 | Soundtrack: "Dunes (Area 3)". |
+| 8 | MUSIC_2_INGAME_3_INTRO | 0:10.6 | Intro of 9. Soundtrack: "Nest (Area 4)" (its intro). |
+| 9 | MUSIC_2_INGAME_3_LOOP | 1:57.4 | Soundtrack: "Nest (Area 4)" (its loop). |
+| 10 | MUSIC_2_INGAME_4_INTRO | 0:22.8 | Intro of 11. Soundtrack: "Forest (Area 5)" (its intro). |
+| 11 | MUSIC_2_INGAME_4_LOOP | 1:21.4 | Soundtrack: "Forest (Area 5)" (its loop). |
+| 12 | MUSIC_2_INGAME_5_INTRO | 0:08.2 | Intro of 13. Soundtrack: "Lab (Area 6)" (its intro). |
+| 13 | MUSIC_2_INGAME_5_LOOP | 1:56.0 | Soundtrack: "Lab (Area 6)" (its loop). |
+| 14 | MUSIC_2_INGAME_6_INTRO | 0:32.0 | Intro of 15. Soundtrack: "HQ (Area 7)" (its intro). |
+| 15 | MUSIC_2_INGAME_6_LOOP | 1:48.6 | Soundtrack: "HQ (Area 7)" (its loop). |
+| 16 | MUSIC_3_BOSS_0 | 0:57.4 | Soundtrack: "Boss 1". |
+| 17 | MUSIC_3_BOSS_1 | 0:35.8 | Soundtrack: "Boss 2". |
+| 18 | MUSIC_3_BOSS_2_INTRO | 0:00.8 | Intro of 19. Soundtrack: "Boss 3" (its intro). |
+| 19 | MUSIC_3_BOSS_2_LOOP | 0:40.8 | Soundtrack: "Boss 3" (its loop). |
+| 20 | MUSIC_3_BOSS_3 | 0:45.2 | Soundtrack: "Boss 4". |
 | 21 | MUSIC_4_CUTSCENE | 0:44.2 | |
 | 22 | MUSIC_5_SHOP | 0:22.4 | |
 | 23 | MUSIC_6_CONTINUE | 0:34.8 | |
-| 24 | MUSIC_7_STAGE_CLEAR | 0:07.2 | |
+| 24 | MUSIC_7_STAGE_CLEAR | 0:07.2 | Soundtrack: "Game Over" (the audio matches this stream, not 25, whatever the firmware's name says). |
 | 25 | MUSIC_8_GAME_OVER | 0:12.0 | |
 | 26 | MUSIC_9_ENDING | 2:00.0 | |
 
