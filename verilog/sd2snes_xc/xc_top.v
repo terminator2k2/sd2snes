@@ -8,7 +8,8 @@
 //
 // main.v connects (GSU-style request ports, see sd2snes_gsu/main.v):
 //   ROM bus (PSRAM): rom_rrq / rom_addr / rom_rdy / rom_rdata (16-bit word reads)
-//   RAM bus (SRAM chip): ram_rrq / ram_wrq / ram_addr / ram_wdata / ram_rdy / ram_rdata
+//   RAM bus (SRAM chip): ram_rrq / ram_wrq / ram_addr / ram_len / ram_wdata / ram_bstb / ram_rdy / ram_rdata
+//     (bursts of ram_len bytes, see the RAM pipeline in main.v)
 //   SNES: the window strobes and data (enable = $00-$3F/$80-$BF:$3000-$3FFF)
 //   MCU: the decode mailbox ports (mcu_cmd.v, XCA_* commands) and a run/reset control
 //////////////////////////////////////////////////////////////////////////////////
@@ -42,7 +43,9 @@ module xc_top #(
   output reg ram_rrq,
   output reg ram_wrq,
   output reg [18:0] ram_addr,
-  output reg [7:0] ram_wdata,
+  output reg [5:0] ram_len,
+  output [7:0] ram_wdata,
+  input ram_bstb,
   input ram_rdy,
   input [7:0] ram_rdata,
 
@@ -117,7 +120,9 @@ xc_soc #(.CLK_NUM(SOC_CLK_NUM), .CLK_DEN(SOC_CLK_DEN), .DIDX(DIDX), .IIDX(IIDX))
 wire br_rrq, br_wrq, br_rdy;
 wire [18:0] br_addr;
 wire [7:0] br_wdata;
-reg [7:0] br_rdata;
+wire [7:0] br_rdata;
+wire [5:0] br_len;
+wire br_bstb;
 wire win_sel, win_we, dec_sel, dec_we;
 wire [11:2] reg_addr;
 wire [31:0] reg_wdata, win_rdata, dec_rdata;
@@ -130,6 +135,7 @@ xc_bridge bridge (
   .clk2(clk2), .rst2(rst2_all),
   .rom_rrq(rom_rrq), .rom_addr(rom_addr), .rom_rdy(rom_rdy), .rom_rdata(rom_rdata),
   .sram_rrq(br_rrq), .sram_wrq(br_wrq), .sram_addr(br_addr), .sram_wdata(br_wdata), .sram_rdy(br_rdy), .sram_rdata(br_rdata),
+  .sram_len(br_len), .sram_bstb(br_bstb),
   .win_sel(win_sel), .win_we(win_we), .reg_addr(reg_addr), .reg_wdata(reg_wdata), .win_rdata(win_rdata), .win_ready(win_ready),
   .dec_sel(dec_sel), .dec_we(dec_we), .dec_rdata(dec_rdata), .dec_ready(dec_ready)
 );
@@ -165,16 +171,21 @@ xc_decbox decbox (
 always @(posedge clk2) if(dec_irq) dec_irq_tog <= ~dec_irq_tog;
 
 //------------------------------------------------------------------------------
-// SRAM arbiter: the window DMA first, then the bridge; one byte per grant
+// SRAM arbiter: the window DMA first (one byte per grant), then the bridge (a burst of up to 32 bytes per
+// grant: line fills and write-backs). During a bridge burst the byte strobe, the read data and the write
+// data pass straight between main.v and the bridge.
 //------------------------------------------------------------------------------
 reg pend_a, pend_b, pend_b_we;
+reg [5:0] len_b;
 reg [18:0] addr_a, addr_b;
-reg [7:0] wdata_b;
 reg rdy_a = 1'b1, rdy_b = 1'b1;
 reg [1:0] ast;                     // 0 idle, 1 issued (rdy drops), 2 waiting
 reg grant_b;
 assign dma_rdy = rdy_a;
 assign br_rdy = rdy_b;
+assign br_bstb = ram_bstb & grant_b & (ast == 2'd2);
+assign br_rdata = ram_rdata;
+assign ram_wdata = br_wdata;        // only the bridge writes; it holds each byte until the strobe
 
 assign mon_dma_rd = (ast == 2'd2) && ram_rdy && !grant_b;
 assign mon_dma_addr = ram_addr;
@@ -187,18 +198,18 @@ always @(posedge clk2) begin
     pend_a <= 1'b0; pend_b <= 1'b0; rdy_a <= 1'b1; rdy_b <= 1'b1; ast <= 2'd0;
   end else begin
     if(dma_rrq) begin pend_a <= 1'b1; addr_a <= dma_addr; rdy_a <= 1'b0; end
-    if(br_rrq | br_wrq) begin pend_b <= 1'b1; pend_b_we <= br_wrq; addr_b <= br_addr; wdata_b <= br_wdata; rdy_b <= 1'b0; end
+    if(br_rrq | br_wrq) begin pend_b <= 1'b1; pend_b_we <= br_wrq; addr_b <= br_addr; len_b <= br_len; rdy_b <= 1'b0; end
     case(ast)
       2'd0: begin
         if(pend_a) begin
-          ram_rrq <= 1'b1; ram_addr <= addr_a; grant_b <= 1'b0; ast <= 2'd1;
+          ram_rrq <= 1'b1; ram_addr <= addr_a; ram_len <= 6'd1; grant_b <= 1'b0; ast <= 2'd1;
         end else if(pend_b) begin
-          ram_rrq <= ~pend_b_we; ram_wrq <= pend_b_we; ram_addr <= addr_b; ram_wdata <= wdata_b; grant_b <= 1'b1; ast <= 2'd1;
+          ram_rrq <= ~pend_b_we; ram_wrq <= pend_b_we; ram_addr <= addr_b; ram_len <= len_b; grant_b <= 1'b1; ast <= 2'd1;
         end
       end
       2'd1: ast <= 2'd2;
       2'd2: if(ram_rdy) begin
-        if(grant_b) begin pend_b <= 1'b0; rdy_b <= 1'b1; br_rdata <= ram_rdata; end
+        if(grant_b) begin pend_b <= 1'b0; rdy_b <= 1'b1; end
         else begin pend_a <= 1'b0; rdy_a <= 1'b1; dma_rdata <= ram_rdata; end
         ast <= 2'd0;
       end

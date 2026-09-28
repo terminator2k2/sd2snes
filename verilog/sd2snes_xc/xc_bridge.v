@@ -18,6 +18,8 @@
 //
 // CLK2 side ports are GSU-style (see sd2snes main.v): *_rrq / *_wrq pulse with the address,
 // *_rdy drops on the next cycle and returns high when the access is done (read data valid).
+// SRAM operations are one burst of op_len bytes (sram_len): sram_bstb marks each read byte on sram_rdata,
+// and for writes each byte taken from sram_wdata (the next one must then be presented); see main.v.
 //////////////////////////////////////////////////////////////////////////////////
 module xc_bridge (
   // SoC side
@@ -45,6 +47,8 @@ module xc_bridge (
   output reg sram_wrq,
   output reg [18:0] sram_addr,
   output reg [7:0] sram_wdata,
+  output reg [5:0] sram_len,
+  input sram_bstb,
   input sram_rdy,
   input [7:0] sram_rdata,
   output reg win_sel,
@@ -133,8 +137,8 @@ always @(posedge clk2) begin
       E_ISSUE: begin
         case(kind)
           3'd0: begin rom_rrq <= 1'b1; rom_addr <= addr + pos; end
-          3'd1: begin sram_rrq <= 1'b1; sram_addr <= addr[18:0] + pos; end
-          default: begin sram_wrq <= 1'b1; sram_addr <= addr[18:0] + pos; sram_wdata <= wbyte; end
+          3'd1: begin sram_rrq <= 1'b1; sram_addr <= addr[18:0]; sram_len <= len; end
+          default: begin sram_wrq <= 1'b1; sram_addr <= addr[18:0]; sram_len <= len; sram_wdata <= wbyte; end
         endcase
         st <= E_WAIT1;
       end
@@ -149,21 +153,23 @@ always @(posedge clk2) begin
             if(pos[1]) acc <= 32'd0;
             pos <= pos + 6'd2;
             st <= (pos + 6'd2 >= len) ? E_DONE : E_ISSUE;
-          end else begin
-            if(kind == 3'd1) begin
-              r_we <= 1'b1; r_waddr <= pos[4:2];
-              case(pos[1:0])
-                2'd0: begin r_wdata <= {acc[31:8], sram_rdata}; acc <= {acc[31:8], sram_rdata}; end
-                2'd1: begin r_wdata <= {acc[31:16], sram_rdata, acc[7:0]}; acc <= {acc[31:16], sram_rdata, acc[7:0]}; end
-                2'd2: begin r_wdata <= {acc[31:24], sram_rdata, acc[15:0]}; acc <= {acc[31:24], sram_rdata, acc[15:0]}; end
-                default: begin r_wdata <= {sram_rdata, acc[23:0]}; acc <= 32'd0; end
-              endcase
-            end
-            pos <= pos + 6'd1;
-            w_raddr <= (pos + 6'd1) >> 2;
-            st <= (pos + 6'd1 >= len) ? E_DONE : (kind == 3'd2) ? E_RDW : E_ISSUE;
-          end
+          end else st <= E_DONE;     // SRAM burst complete (the bytes were handled at their strobes below)
         end
+        if(kind != 3'd0 && sram_bstb) begin
+          if(kind == 3'd1) begin
+            r_we <= 1'b1; r_waddr <= pos[4:2];
+            case(pos[1:0])
+              2'd0: begin r_wdata <= {acc[31:8], sram_rdata}; acc <= {acc[31:8], sram_rdata}; end
+              2'd1: begin r_wdata <= {acc[31:16], sram_rdata, acc[7:0]}; acc <= {acc[31:16], sram_rdata, acc[7:0]}; end
+              2'd2: begin r_wdata <= {acc[31:24], sram_rdata, acc[15:0]}; acc <= {acc[31:24], sram_rdata, acc[15:0]}; end
+              default: begin r_wdata <= {sram_rdata, acc[23:0]}; acc <= 32'd0; end
+            endcase
+          end
+          pos <= pos + 6'd1;
+          w_raddr <= (pos + 6'd1) >> 2;          // write: the word of the next byte
+        end
+        if(kind == 3'd2) sram_wdata <= wbyte;    // write: follows pos (the word read lags one cycle, well
+                                                 // before main.v takes the next byte)
       end
       E_REGW: st <= E_REG;         // register write data (word 0) is read
       E_REG: begin

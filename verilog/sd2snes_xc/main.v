@@ -397,6 +397,8 @@ reg  [7:0]  XC_RAM_DINr;
 wire [18:0] XC_RAM_ADDR;
 wire [7:0]  XC_RAM_DOUT;
 wire        XC_RAM_RRQ, XC_RAM_WRQ, XC_RAM_RDY;
+wire [5:0]  XC_RAM_LEN;              // burst length in bytes (1..32), with XC_RAM_RRQ / XC_RAM_WRQ
+wire        XC_RAM_BSTB;             // burst byte strobe (see the RAM pipeline)
 wire [7:0]  XC_SNES_DATA_OUT;
 wire        xc_enable;
 
@@ -432,6 +434,8 @@ xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(1), .DIDX(8), .IIDX(8)) snes
   .ram_wrq(XC_RAM_WRQ),
   .ram_addr(XC_RAM_ADDR),
   .ram_wdata(XC_RAM_DOUT),
+  .ram_len(XC_RAM_LEN),
+  .ram_bstb(XC_RAM_BSTB),
   .ram_rdy(XC_RAM_RDY),
   .ram_rdata(XC_RAM_DINr),
   .mcu_status(xca_status),
@@ -1028,6 +1032,15 @@ reg [7:0]  GSU_RAM_DATAr;
 
 reg RQ_GSU_RAM_RDYr; initial RQ_GSU_RAM_RDYr = 1;
 assign XC_RAM_RDY = RQ_GSU_RAM_RDYr;
+// Bursts (Xeno Crisis soft CPU line fills / write-backs): XC_RAM_LEN bytes from XC_RAM_ADDR up, one request.
+// Each byte is a normal access (ADDR for RAM_CYCLE_LEN + 1 cycles, END, IDLE), about 8 CLK2 cycles instead of
+// about 15 for a separate request per byte. XC_RAM_BSTB (one cycle):
+//   read:  a byte is in XC_RAM_DINr (bytes in order; with the last one XC_RAM_RDY rises too)
+//   write: the byte on XC_RAM_DOUT was latched; present the next one before the next strobe position
+//          (the first byte is taken with XC_RAM_WRQ; XC_RAM_RDY rises after the last byte is written)
+reg [5:0] GSU_RAM_LEFTr;
+reg GSU_RAM_BSTBr = 1'b0;
+assign XC_RAM_BSTB = GSU_RAM_BSTBr;
 
 wire GSU_RAM_WE_HIT = |(RAM_STATE & ST_RAM_GSU_WR_ADDR);
 wire GSU_RAM_WR_HIT = |(RAM_STATE & (ST_RAM_GSU_WR_ADDR | ST_RAM_GSU_WR_END));
@@ -1036,19 +1049,34 @@ wire GSU_RAM_HIT    = GSU_RAM_WR_HIT | GSU_RAM_RD_HIT;
 
 // GSU RAM1 r/w request
 always @(posedge CLK2) begin
+  GSU_RAM_BSTBr <= 1'b0;
   if(XC_RAM_RRQ) begin
     GSU_RAM_RD_PENDr <= 1'b1;
     RQ_GSU_RAM_RDYr <= 1'b0;
     GSU_RAM_ADDRr <= XC_RAM_ADDR;
+    GSU_RAM_LEFTr <= (XC_RAM_LEN == 6'd0) ? 6'd0 : XC_RAM_LEN - 6'd1;
   end else if(XC_RAM_WRQ) begin
     GSU_RAM_WR_PENDr <= 1'b1;
     RQ_GSU_RAM_RDYr <= 1'b0;
     GSU_RAM_ADDRr <= XC_RAM_ADDR;
     GSU_RAM_DATAr <= XC_RAM_DOUT;
+    GSU_RAM_LEFTr <= (XC_RAM_LEN == 6'd0) ? 6'd0 : XC_RAM_LEN - 6'd1;
+    GSU_RAM_BSTBr <= 1'b1;                                   // write byte latched: present the next one
   end else if(RAM_STATE & (ST_RAM_GSU_RD_END | ST_RAM_GSU_WR_END)) begin
-    GSU_RAM_RD_PENDr <= 1'b0;
-    GSU_RAM_WR_PENDr <= 1'b0;
-    RQ_GSU_RAM_RDYr <= 1'b1;
+    if(RAM_STATE & ST_RAM_GSU_RD_END) GSU_RAM_BSTBr <= 1'b1;   // read byte in XC_RAM_DINr
+    if(GSU_RAM_LEFTr != 6'd0) begin
+      // burst: next byte (the request stays pending, the state machine goes through IDLE back to ADDR)
+      GSU_RAM_ADDRr <= GSU_RAM_ADDRr + 19'd1;
+      GSU_RAM_LEFTr <= GSU_RAM_LEFTr - 6'd1;
+      if(RAM_STATE & ST_RAM_GSU_WR_END) begin
+        GSU_RAM_DATAr <= XC_RAM_DOUT;
+        GSU_RAM_BSTBr <= 1'b1;
+      end
+    end else begin
+      GSU_RAM_RD_PENDr <= 1'b0;
+      GSU_RAM_WR_PENDr <= 1'b0;
+      RQ_GSU_RAM_RDYr <= 1'b1;
+    end
   end
 end
 
