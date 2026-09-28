@@ -108,7 +108,13 @@ reg ibuf_valid;
 reg [15:0] ir1;                 // first halfword of a 32-bit instruction (S_FETCH2 / S_X32)
 
 wire [31:0] pc2 = pc + 32'd2;
-wire [31:0] pc4 = pc + 32'd4;
+// pc + 4 (what the core reads as PC) is kept in a register, so the ALU operand path starts at a flip-flop
+// instead of an adder (it was on the critical path: pc -> +4 -> opA -> ALU -> register file). It follows
+// pc on sequential steps; after a jump it is recomputed in the next cycle, and no instruction starts
+// before that (exec16_now waits for pc4_ok; the fetch after a jump takes longer anyway).
+reg [31:0] pc4r;
+reg pc4_ok;
+wire [31:0] pc4 = pc4r;
 wire fetch_now = bus_ready && (state == S_FETCH || state == S_FETCH2);
 wire [15:0] op = pc[1] ? ibuf[31:16] : ibuf[15:0];
 wire ibuf_hit = ibuf_valid && (ibuf_addr == pc[31:2]);
@@ -348,7 +354,7 @@ always @* begin
   early = 1'b0;
   iss_sum = 1'b0; iss_sum_clr = 3'b000;
 
-  exec16_now = (state == S_IDLE) && go && !dbg_we && !take_exc && ibuf_hit;
+  exec16_now = (state == S_IDLE) && go && !dbg_we && !take_exc && ibuf_hit && pc4_ok;
   exec32_now = (exec16_now && op[15:13] == 3'b111 && op[12:11] != 2'b00 && ibuf_hit2) || (state == S_X32); // op[15:11] >= 0x1D
 
   if(exec32_now) begin
@@ -766,6 +772,7 @@ always @(posedge clk) begin
     rf[13] <= reset_sp;
     rf[14] <= 32'hFFFFFFFF;
     pc <= reset_pc;
+    pc4_ok <= 1'b0;
     flag_n <= 1'b0; flag_z <= 1'b0; flag_c <= 1'b0; flag_v <= 1'b0;
     primask <= 1'b0;
     ipsr <= 6'd0;
@@ -783,7 +790,7 @@ always @(posedge clk) begin
   end else if(dbg_now) begin
     step_done <= 1'b0;
     if(w_en) rf[w_idx] <= w_data;
-    if(dbg_sel == 5'd15) pc <= {dbg_wdata[31:1], 1'b0};
+    if(dbg_sel == 5'd15) begin pc <= {dbg_wdata[31:1], 1'b0}; pc4_ok <= 1'b0; end
     else if(dbg_sel == 5'd16) begin flag_n <= dbg_wdata[31]; flag_z <= dbg_wdata[30]; flag_c <= dbg_wdata[29]; flag_v <= dbg_wdata[28]; end
     else if(dbg_sel == 5'd17) primask <= dbg_wdata[0];
     else if(dbg_sel == 5'd18) ipsr <= dbg_wdata[5:0];
@@ -820,12 +827,15 @@ always @(posedge clk) begin
     // program counter
     if(pc_en) begin
       case(pc_src)
-        PC_2: pc <= pc2;
-        PC_4: pc <= pc4;
-        PC_ALU: pc <= {alu_res[31:1], 1'b0};
-        PC_RDB: pc <= {rdB[31:1], 1'b0};
-        default: pc <= {bus_rdata[31:1], 1'b0};
+        PC_2: begin pc <= pc2; pc4r <= pc4r + 32'd2; end
+        PC_4: begin pc <= pc4r; pc4r <= pc4r + 32'd4; end
+        PC_ALU: begin pc <= {alu_res[31:1], 1'b0}; pc4_ok <= 1'b0; end
+        PC_RDB: begin pc <= {rdB[31:1], 1'b0}; pc4_ok <= 1'b0; end
+        default: begin pc <= {bus_rdata[31:1], 1'b0}; pc4_ok <= 1'b0; end
       endcase
+    end else if(!pc4_ok) begin
+      pc4r <= pc + 32'd4;
+      pc4_ok <= 1'b1;
     end
 
     // fetch buffer
