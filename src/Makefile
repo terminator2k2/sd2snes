@@ -105,9 +105,13 @@ SRC += sufami.c
 ifeq ($(CONFIG_MK3),y)
 SRC += xc_audio.c xc_load.c
 endif
+# make XC_MSU_DIAG=1: diagnostic build for the MSU-1 core (xcaudio.txt from msu1_loop), without the Opus decoder
+# (it would not fit next to it in the STM32's flash; the MSU-1 core does not use it). Not for normal use.
 ifeq ($(CONFIG_MK3_STM32),y)
+ifeq ($(XC_MSU_DIAG),)
 XC_OPUS_DIR ?= xc_opus
 XC_OPUS_LIB = $(XC_OPUS_DIR)/libopus_xc.a
+endif
 endif
 
 SRC += usbdesc.c usbcore.c usbuser.c cdcuser.c usbinterface.c
@@ -159,6 +163,9 @@ CSTANDARD = -std=gnu99
 
 # Place -D or -U options here
 CDEFS = -DF_OSC=$(CONFIG_MCU_FOSC)UL
+ifneq ($(XC_MSU_DIAG),)
+CDEFS += -DXC_MSU_DIAG
+endif
 
 # Place -I options here
 CINCS = -Iinclude -Iinclude/arm

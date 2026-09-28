@@ -26,12 +26,16 @@
  */
 #include <string.h>
 #include "config.h"
+#if defined(CONFIG_MK3_STM32) && !defined(XC_MSU_DIAG)
+#define XC_OPUS 1    /* the Opus decoder (firmware.stm; not in the MSU-1 diagnostic build) */
+#endif
 #include "fpga_spi.h"
 #include "xc_audio.h"
 #include "msu1.h"
 #include "smc.h"
+#include "memory.h"
 extern snes_romprops_t romprops;
-#ifdef CONFIG_MK3_STM32
+#ifdef XC_OPUS
 #include "opus.h"
 #endif
 #include "uart.h"
@@ -48,7 +52,7 @@ extern snes_romprops_t romprops;
 #endif
 #define XC_CYC_PER_US  (CONFIG_CPU_FREQUENCY / 1000000)
 
-#ifdef CONFIG_MK3_STM32
+#ifdef XC_OPUS
 /* opus_decoder_get_size(2) is 26,496 bytes for this build; keep a margin */
 static uint32_t decoder_mem[27136 / 4];
 static uint8_t packet[1536];
@@ -62,8 +66,14 @@ static uint8_t active;
 static uint8_t in_service;     /* xc_audio_poll() called from inside another MCU job (CRC, save) */
 static uint32_t log_writes;
 static uint32_t log_ms;        /* time the previous log write took */
+static uint32_t soc_code, soc_addr;
+static uint8_t soc_st;         /* last soft CPU status: bit 0 halted, bit 1 running */
+#ifdef XC_MSU_DIAG
+uint32_t xc_msu_mcu[4];        /* MSU-1 core, from msu1_loop(): track requests, last track, ctrl writes, refills */
+#endif
 
 static void read_perf(uint32_t* w);
+static void check_soc(void);
 
 static struct {
 	uint32_t last_poll;          /* cycle count at the last poll */
@@ -71,7 +81,7 @@ static struct {
 	uint8_t first_poll_after_job;
 	uint8_t log_due;
 	uint32_t jobs, waiting;      /* jobs; jobs already waiting at the first poll after the previous one */
-	uint64_t svc_sum, dec_sum;   /* cycles: whole service (read packet .. done), decode alone */
+	uint32_t svc_sum, dec_sum;   /* us: whole service (read packet .. done), decode alone (32-bit: no 64-bit division in the image) */
 	uint32_t svc_max, dec_max, gap_max;
 	uint32_t gaps_over_5ms, gaps_over_20ms, svc_over_20ms;
 	uint32_t perf[8];            /* FPGA counters at the previous log (xc_top "perf") */
@@ -85,7 +95,7 @@ static struct {
  *    latches a written byte a few CLK2 cycles after the byte ends).
  *  - reads: FPGA_RX_BYTE() waits for the bus to go idle before each byte (as get_msu_pointer() does);
  *  - writes: FPGA_TX_BYTE() + FPGA_TX_SYNC() leaves the same gap after each byte. */
-#ifdef CONFIG_MK3_STM32
+#ifdef XC_OPUS
 static void xc_rx(uint8_t* dst, uint32_t n)
 {
 	while(n--) *dst++ = FPGA_RX_BYTE();
@@ -109,7 +119,7 @@ void xc_run(uint8_t run)
 
 void xc_audio_init(void)
 {
-#ifdef CONFIG_MK3_STM32
+#ifdef XC_OPUS
 	decoder_ok = opus_decoder_get_size(2) <= (int)sizeof(decoder_mem)
 		&& opus_decoder_init((OpusDecoder*)decoder_mem, 24000, 2) == OPUS_OK;
 #endif
@@ -129,7 +139,7 @@ void xc_audio_init(void)
 	active = 1;
 }
 
-static uint32_t cyc_us(uint64_t c) { return (uint32_t)(c / XC_CYC_PER_US); }
+static uint32_t cyc_us(uint32_t c) { return c / XC_CYC_PER_US; }
 
 /* FPGA performance counters: $C7 takes a snapshot, $C8 reads it (8 words, see xc_top.v "perf") */
 static void read_perf(uint32_t* w)
@@ -148,7 +158,7 @@ static void read_perf(uint32_t* w)
 	FPGA_DESELECT();
 }
 
-static uint32_t pct(uint32_t part, uint32_t whole) { return whole ? (uint32_t)((uint64_t)part * 100u / whole) : 0; }
+static uint32_t pct(uint32_t part, uint32_t whole) { return whole >= 100u ? part / (whole / 100u) : 0; }
 
 static int format_stats(char* b, int size)
 {
@@ -158,17 +168,36 @@ static int format_stats(char* b, int size)
 	for(int i = 0; i < 8; i++) d[i] = w[i] - xs.perf[i];   /* since the previous log (32-bit counters wrap) */
 	d[6] = w[6];                                             /* longest tick: reset by each snapshot */
 	memcpy(xs.perf, w, sizeof(w));
-	int n = snprintf(b, size,
+	int n;
+#ifdef XC_MSU_DIAG
+	if(romprops.has_msu1) {
+		/* the mixer's counters and state (socfw/xc_mix.c "dbg", "st"): RAM 0x20040000 = SRAM chip 0x48000
+		   (the soft CPU's D-cache is write-back, so they may lag a little) */
+		uint32_t m[25];
+		sram_readblock(m, SRAM_SAVE_ADDR + 0x48000, sizeof(m));
+		n = snprintf(b, size,
+			"MSU-1: soc st %u code %08lx at %08lx\r\n"
+			" mixer %08lx mode %06lx: ticks %lu calls %lu sfx %lu blocks %lu defer %lu pkts %lu msu wr %lu st %02lx trk %lu\r\n"
+			" state %08lx %08lx %08lx %08lx %08lx %08lx %08lx\r\n"
+			" MCU: tracks %lu (last %lu) ctrl %lu refills %lu\r\n",
+			soc_st, soc_code, soc_addr, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10],
+			m[11], m[12], m[13], m[14], m[15], m[16], m[17],
+			xc_msu_mcu[0], xc_msu_mcu[1], xc_msu_mcu[2], xc_msu_mcu[3]);
+	} else
+#endif
+	n = snprintf(b, size,
 		"MCU decode: %lu packets, %lu errors, mixer waited %lu\r\n"
 		" service us (incl. poll gap): avg %lu max %lu, >20ms %lu\r\n"
 		" decode us: avg %lu max %lu\r\n"
-		" poll gaps: max %lu us, >5ms %lu, >20ms %lu\r\n"
+		" poll gaps: max %lu us, >5ms %lu, >20ms %lu\r\n",
+		(unsigned long)xs.jobs, (unsigned long)xc_audio_errors, (unsigned long)xs.waiting,
+		(unsigned long)(xs.svc_sum / j), (unsigned long)cyc_us(xs.svc_max), (unsigned long)xs.svc_over_20ms,
+		(unsigned long)(xs.dec_sum / j), (unsigned long)cyc_us(xs.dec_max),
+		(unsigned long)cyc_us(xs.gap_max), (unsigned long)xs.gaps_over_5ms, (unsigned long)xs.gaps_over_20ms);
+	if(n < 0 || n >= size) return size - 1;
+	n += snprintf(b + n, size - n,
 		"FPGA since last log: %lu cycles; stalls fetch %lu%% flash %lu%% RAM %lu%%\r\n"
 		" ticks %lu, >1 frame %lu, longest %lu us; window underruns %lu\r\n",
-		(unsigned long)xs.jobs, (unsigned long)xc_audio_errors, (unsigned long)xs.waiting,
-		(unsigned long)cyc_us(xs.svc_sum / j), (unsigned long)cyc_us(xs.svc_max), (unsigned long)xs.svc_over_20ms,
-		(unsigned long)cyc_us(xs.dec_sum / j), (unsigned long)cyc_us(xs.dec_max),
-		(unsigned long)cyc_us(xs.gap_max), (unsigned long)xs.gaps_over_5ms, (unsigned long)xs.gaps_over_20ms,
 		(unsigned long)d[0], (unsigned long)pct(d[1], d[0]), (unsigned long)pct(d[2], d[0]), (unsigned long)pct(d[3], d[0]),
 		(unsigned long)d[4], (unsigned long)d[5], (unsigned long)(d[6] * 4u / 161u), (unsigned long)d[7]);
 	if(n < 0 || n >= size) return size - 1;
@@ -204,6 +233,16 @@ static void write_log(const char* why)
 #endif
 }
 
+#ifdef XC_MSU_DIAG
+/* MSU-1 core (msu1_loop): the log without the decode service */
+void xc_msu_log(const char* why)
+{
+	if(!log_writes) { read_perf(xs.perf); log_ms = 0; }
+	check_soc();
+	write_log(why);
+}
+#endif
+
 void xc_audio_report(void)
 {
 	if(!active) return;
@@ -236,6 +275,7 @@ static void check_soc(void)
 	for(int i = 0; i < 4; i++) code |= (uint32_t)FPGA_RX_BYTE() << (8 * i);
 	for(int i = 0; i < 4; i++) addr |= (uint32_t)FPGA_RX_BYTE() << (8 * i);
 	FPGA_DESELECT();
+	soc_st = st; soc_code = code; soc_addr = addr;
 	if((st & 1) && !halt_reported) {
 		halt_reported = 1;
 		printf("XC halted: %08lx at %08lx\n", code, addr);
@@ -269,7 +309,7 @@ void xc_audio_poll(void)
 	uint8_t st = read_status(&len);
 
 	if(st & XCA_ST_RESET) {
-#ifdef CONFIG_MK3_STM32
+#ifdef XC_OPUS
 		decoder_ok = opus_decoder_init((OpusDecoder*)decoder_mem, 24000, 2) == OPUS_OK;
 #endif
 		FPGA_SELECT();
@@ -285,7 +325,7 @@ void xc_audio_poll(void)
 	if(first) xs.waiting++;
 	uint32_t t0 = now - gap;     /* the job may have been waiting since the previous poll (or the previous job) */
 
-#ifndef CONFIG_MK3_STM32
+#ifndef XC_OPUS
 	/* LPC1756: no decoder. "Nothing decoded": the mixer ends the track and keeps mixing the sound effects. */
 	(void)len;
 	xc_audio_packets++;
@@ -330,8 +370,8 @@ void xc_audio_poll(void)
 	uint32_t end = XC_CYCLES();
 	uint32_t svc = end - t0;
 	xs.jobs++;
-	xs.svc_sum += svc;
-	xs.dec_sum += td;
+	xs.svc_sum += cyc_us(svc);
+	xs.dec_sum += cyc_us(td);
 	if(svc > xs.svc_max) xs.svc_max = svc;
 	if(td > xs.dec_max) xs.dec_max = td;
 	if(svc > 20000u * XC_CYC_PER_US) xs.svc_over_20ms++;
