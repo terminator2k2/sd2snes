@@ -116,6 +116,8 @@ module mcu_cmd(
   //   $C4 XCA_ACKRESET
   //   $C5 XC_STATUS    read: (null), {running, halted}, halt code (4 bytes LE), halt address (4 bytes LE)
   //   $C6 XC_RUN       write: 1 = release the soft CPU (after the image and the save are loaded), 0 = hold it
+  //   $C7 XC_PERF_SNAP take a snapshot of the performance counters (xc_top "perf")
+  //   $C8 XC_PERF      read: (null), 32 bytes: 8 counters, little-endian
   output reg xc_run = 0,
   input [1:0] xca_status,
   input [10:0] xca_len,
@@ -131,7 +133,9 @@ module mcu_cmd(
   output reg xca_ack_reset = 0,
   input [1:0] xc_status,
   input [31:0] xc_halt_code,
-  input [31:0] xc_halt_addr
+  input [31:0] xc_halt_addr,
+  output reg xc_perf_snap = 0,
+  input [255:0] xc_perf
 );
 
 initial begin
@@ -541,6 +545,8 @@ always @(posedge clk) begin
         32'ha: MCU_DATA_IN_BUF <= xc_halt_addr[31:24];
         default: MCU_DATA_IN_BUF <= 8'h00;
       endcase
+    else if (cmd_data[7:0] == 8'hC8)
+      MCU_DATA_IN_BUF <= (spi_byte_cnt >= 32'h2 && spi_byte_cnt < 32'h22) ? xc_perf[{spi_byte_cnt[4:0] - 5'd2, 3'd0} +: 8] : 8'h00;
     else if (cmd_data[7:0] == 8'hD1)
       MCU_DATA_IN_BUF <= snescmd_data_in;
   end
@@ -558,8 +564,10 @@ always @(posedge clk) begin
   xca_pcm_wr <= 1'b0;
   xca_done <= 1'b0;
   xca_ack_reset <= 1'b0;
+  xc_perf_snap <= 1'b0;
   if(cmd_ready) begin
     case(cmd_data)
+      8'hc7: xc_perf_snap <= 1'b1;
       8'hc1: xca_pkt_start <= 1'b1;
       8'hc2: xca_pcm_start <= 1'b1;
       8'hc4: xca_ack_reset <= 1'b1;

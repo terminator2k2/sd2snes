@@ -408,8 +408,10 @@ wire [31:0] xca_ret, xca_range;
 wire        xc_running, xc_halted;
 wire        xc_run;
 wire [31:0] xc_halt_code, xc_halt_addr;
+wire        xc_perf_snap;
+wire [255:0] xc_perf;
 
-xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(0)) snes_xc (   // 40.25 MHz, must match the PLL's clk1
+xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(1)) snes_xc (   // 40.25 MHz, must match the PLL's clk1
   .clk2(CLK2),
   .clk_soc(CLK_SOC),
   .rst2(SNES_DEADr),
@@ -452,6 +454,8 @@ xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(0)) snes_xc (   // 40.25 MHz
   .stat_rx_written(),
   .stat_desc(),
   .stat_underrun(),
+  .perf_snap(xc_perf_snap),
+  .perf_data(xc_perf),
   .mon_req(), .mon_ready(), .mon_we(), .mon_fetch(), .mon_size(), .mon_addr(), .mon_wdata(), .mon_rdata(),
   .mon_dma_rd(), .mon_dma_addr(), .mon_dma_data()
 );
@@ -550,7 +554,9 @@ mcu_cmd snes_mcu_cmd(
   .xc_run(xc_run),
   .xc_status({xc_running, xc_halted}),
   .xc_halt_code(xc_halt_code),
-  .xc_halt_addr(xc_halt_addr)
+  .xc_halt_addr(xc_halt_addr),
+  .xc_perf_snap(xc_perf_snap),
+  .xc_perf(xc_perf)
 );
 
 address snes_addr(

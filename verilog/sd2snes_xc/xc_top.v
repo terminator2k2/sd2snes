@@ -70,6 +70,10 @@ module xc_top #(
   output [31:0] stat_desc,
   output [31:0] stat_underrun,
 
+  // performance counters for the MCU ($C7 snapshot, $C8 read; see "perf" below)
+  input perf_snap,                 // clk2 pulse: take a snapshot
+  output [255:0] perf_data,        // the snapshot (static after perf_snap)
+
   // simulation observation
   output mon_req, output mon_ready, output mon_we, output mon_fetch, output [1:0] mon_size,
   output [31:0] mon_addr, output [31:0] mon_wdata, output [31:0] mon_rdata,
@@ -200,5 +204,60 @@ always @(posedge clk2) begin
     endcase
   end
 end
+
+//------------------------------------------------------------------------------
+// perf: hardware counters, read by the MCU into its log (xcaudio.txt)
+//   word 0  SoC cycles
+//   word 1  SoC cycles stalled on instruction fetches (I-cache misses: flash / bootrom over the ROM bus)
+//   word 2  SoC cycles stalled on data accesses to flash (D-cache misses over the ROM bus)
+//   word 3  SoC cycles stalled on data accesses to RAM (D-cache misses and write-backs over the RAM bus)
+//   word 4  game ticks: the firmware read the SNES end-of-frame message ($111 from RX_DATA) and then posted
+//           its next stream descriptor (the same measure as the RTL co-simulation)
+//   word 5  game ticks that took longer than one SNES frame (16.64 ms)
+//   word 6  longest game tick since the previous snapshot (SoC cycles)
+//   word 7  window: SNES reads that found the prefetch ring empty while a descriptor was queued
+// The SoC counters run in clk_soc and are copied on a synchronized toggle; the MCU reads them a few
+// microseconds after $C7, when they are static. The bus monitor signals are registered first, so the
+// counters stay off the core's timing paths.
+//------------------------------------------------------------------------------
+reg perf_tog2 = 1'b0;
+reg [31:0] perf_underrun_s;
+always @(posedge clk2) if(perf_snap) begin perf_tog2 <= ~perf_tog2; perf_underrun_s <= stat_underrun; end
+
+(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *) reg [2:0] perf_tog_s = 3'b000;
+reg m_req, m_ready, m_we, m_fetch, m_flash, m_ram, m_msg_rd, m_post;
+reg have_msg = 1'b0;
+reg [31:0] pc_cyc = 0, pc_fstall = 0, pc_dflash = 0, pc_dram = 0, pc_ticks = 0, pc_late = 0, pc_max = 0, tick_lat = 0;
+reg [31:0] ps_cyc, ps_fstall, ps_dflash, ps_dram, ps_ticks, ps_late, ps_max;
+localparam [31:0] LATE = SOC_CLK_NUM * 16640 / SOC_CLK_DEN;   // 16.64 ms in SoC cycles
+always @(posedge clk_soc) begin
+  perf_tog_s <= {perf_tog_s[1:0], perf_tog2};
+  m_req <= mon_req; m_ready <= mon_ready; m_we <= mon_we; m_fetch <= mon_fetch;
+  m_flash <= (mon_addr[31:28] == 4'h1) || (mon_addr[31:14] == 18'd0);
+  m_ram <= (mon_addr[31:28] == 4'h2);
+  m_msg_rd <= mon_req & mon_ready & ~mon_we & ~mon_fetch & (mon_addr == 32'h50803010) & (mon_rdata == 32'h111);
+  m_post <= mon_req & mon_ready & mon_we & (mon_addr == 32'h50803004) & (mon_wdata != 32'd0);
+  pc_cyc <= pc_cyc + 1'b1;
+  if(m_req & ~m_ready) begin
+    if(m_fetch) pc_fstall <= pc_fstall + 1'b1;
+    else if(m_flash) pc_dflash <= pc_dflash + 1'b1;
+    else if(m_ram) pc_dram <= pc_dram + 1'b1;
+  end
+  if(have_msg) tick_lat <= tick_lat + 1'b1;
+  if(m_msg_rd && !have_msg) begin have_msg <= 1'b1; tick_lat <= 32'd0; end
+  else if(m_post && have_msg) begin
+    have_msg <= 1'b0;
+    pc_ticks <= pc_ticks + 1'b1;
+    if(tick_lat > LATE) pc_late <= pc_late + 1'b1;
+    if(tick_lat > pc_max) pc_max <= tick_lat;
+  end
+  if(perf_tog_s[2] != perf_tog_s[1]) begin
+    ps_cyc <= pc_cyc; ps_fstall <= pc_fstall; ps_dflash <= pc_dflash; ps_dram <= pc_dram;
+    ps_ticks <= pc_ticks; ps_late <= pc_late; ps_max <= pc_max;
+    pc_max <= 32'd0;
+  end
+  if(rst_soc) have_msg <= 1'b0;
+end
+assign perf_data = {perf_underrun_s, ps_max, ps_late, ps_ticks, ps_dram, ps_dflash, ps_fstall, ps_cyc};
 
 endmodule

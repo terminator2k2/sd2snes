@@ -154,6 +154,10 @@ FPGA commands (`mcu_cmd.v`):
 | `$C4` XCA_ACKRESET | clear the decoder reset request |
 | `$C5` XC_STATUS | read: null, {running, halted}, halt code (4 LE), halt address (4 LE) |
 | `$C6` XC_RUN | write: 1 = release the soft CPU, 0 = hold it |
+| `$C7` XC_PERF_SNAP | snapshot of the performance counters |
+| `$C8` XC_PERF | read: null, 8 counters (4 bytes LE each) |
+
+**Performance counters** (`xc_top.v`, "perf"; the MCU logs them in `xcaudio.txt`, as differences since the previous log): SoC cycles; cycles stalled on instruction fetches, on flash data and on RAM data; game ticks (the firmware read the SNES end-of-frame message and posted its next stream descriptor), ticks longer than one SNES frame (16.64 ms), the longest tick; and window underruns (SNES reads that found the prefetch ring empty while a descriptor was queued). They were added after the first hardware reports of slowdowns and flicker at the top of the screen, which the RTL co-simulation doesn't show (3–5 ticks longer than a frame in 900 frames). In the co-simulation they match the bus monitor's own counts (e.g. 123 ticks, longest 456,420 vs 456,421 cycles, 1 underrun). The SoC counters are copied on a synchronized toggle; `clk[0]` and `clk[1]` are asynchronous clock groups in `main.sdc`, so the MCU's read of the static snapshot is not timed.
 
 ## Building and using it
 

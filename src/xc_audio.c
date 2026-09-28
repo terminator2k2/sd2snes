@@ -44,7 +44,6 @@
 #define XC_CYCLES_ON() do { XC_DEMCR |= 1u << 24; XC_DWT_CTRL |= 1u; } while(0)
 #endif
 #define XC_CYC_PER_US  (CONFIG_CPU_FREQUENCY / 1000000)
-#define XC_HIST        48              /* 1 ms buckets; the last one is "47 ms or more" */
 
 #ifdef CONFIG_MK3_STM32
 /* opus_decoder_get_size(2) is 26,496 bytes for this build; keep a margin */
@@ -61,6 +60,8 @@ static uint8_t in_service;     /* xc_audio_poll() called from inside another MCU
 static uint32_t log_writes;
 static uint32_t log_ms;        /* time the previous log write took */
 
+static void read_perf(uint32_t* w);
+
 static struct {
 	uint32_t last_poll;          /* cycle count at the last poll */
 	uint32_t last_done;          /* cycle count at the end of the last job */
@@ -69,9 +70,8 @@ static struct {
 	uint32_t jobs, waiting;      /* jobs; jobs already waiting at the first poll after the previous one */
 	uint64_t svc_sum, dec_sum;   /* cycles: whole service (read packet .. done), decode alone */
 	uint32_t svc_max, dec_max, gap_max;
-	uint32_t gaps_over_5ms, gaps_over_20ms;
-	uint32_t svc_hist[XC_HIST];  /* per-job service time + the poll gap before it (ms) */
-	uint32_t gap_hist[XC_HIST];  /* poll gaps (ms), all polls */
+	uint32_t gaps_over_5ms, gaps_over_20ms, svc_over_20ms;
+	uint32_t perf[8];            /* FPGA counters at the previous log (xc_top "perf") */
 } xs IN_AHBRAM;                  /* AHB RAM on the LPC1756, whose main RAM is short (cleared in xc_audio_init) */
 
 /* SPI to the FPGA, one byte at a time, the way the stock firmware talks to it.
@@ -121,62 +121,54 @@ void xc_audio_init(void)
 #ifdef XC_CYCLES_ON
 	XC_CYCLES_ON();
 #endif
+	read_perf(xs.perf);
 	xs.last_poll = XC_CYCLES();
 	active = 1;
 }
 
-static void hist_add(uint32_t* h, uint32_t cycles)
-{
-	uint32_t ms = cycles / (XC_CYC_PER_US * 1000u);
-	h[ms < XC_HIST ? ms : XC_HIST - 1]++;
-}
-
 static uint32_t cyc_us(uint64_t c) { return (uint32_t)(c / XC_CYC_PER_US); }
 
-/* p-th percentile (per mille) of a 1 ms histogram, in ms (upper bucket edge) */
-static uint32_t hist_pct(const uint32_t* h, uint32_t permille)
+/* FPGA performance counters: $C7 takes a snapshot, $C8 reads it (8 words, see xc_top.v "perf") */
+static void read_perf(uint32_t* w)
 {
-	uint32_t n = 0, acc = 0;
-	for(int i = 0; i < XC_HIST; i++) n += h[i];
-	if(!n) return 0;
-	for(int i = 0; i < XC_HIST; i++) {
-		acc += h[i];
-		if((uint64_t)acc * 1000u >= (uint64_t)n * permille) return i + 1;
+	FPGA_SELECT();
+	xc_tx(FPGA_CMD_XC_PERF_SNAP);
+	FPGA_DESELECT();
+	FPGA_SELECT();
+	xc_tx(FPGA_CMD_XC_PERF);
+	FPGA_RX_BYTE(); /* null read */
+	for(int i = 0; i < 8; i++) {
+		uint32_t v = 0;
+		for(int k = 0; k < 4; k++) v |= (uint32_t)FPGA_RX_BYTE() << (8 * k);
+		w[i] = v;
 	}
-	return XC_HIST;
+	FPGA_DESELECT();
 }
+
+static uint32_t pct(uint32_t part, uint32_t whole) { return whole ? (uint32_t)((uint64_t)part * 100u / whole) : 0; }
 
 static int format_stats(char* b, int size)
 {
 	uint32_t j = xs.jobs ? xs.jobs : 1;
+	uint32_t w[8], d[8];
+	read_perf(w);
+	for(int i = 0; i < 8; i++) d[i] = w[i] - xs.perf[i];   /* since the previous log (32-bit counters wrap) */
+	d[6] = w[6];                                             /* longest tick: reset by each snapshot */
+	memcpy(xs.perf, w, sizeof(w));
 	int n = snprintf(b, size,
-		"Xeno Crisis audio (MCU decode service): %lu packets, %lu errors, mixer already waiting for %lu\r\n"
-		"  service per packet (us): avg %lu, max %lu; p50 %lu ms, p99 %lu ms, p99.9 %lu ms (with the poll gap before)\r\n"
+		"MCU decode service: %lu packets, %lu errors, mixer already waiting for %lu\r\n"
+		"  service per packet (us): avg %lu, max %lu, over 20 ms %lu (with the poll gap before)\r\n"
 		"  decode alone (us): avg %lu, max %lu\r\n"
-		"  poll gaps: max %lu us, over 5 ms %lu, over 20 ms %lu; p99.9 %lu ms\r\n",
+		"  poll gaps: max %lu us, over 5 ms %lu, over 20 ms %lu\r\n"
+		"FPGA, since the previous log: %lu soft CPU cycles; stalled on fetch %lu%%, flash data %lu%%, RAM data %lu%%\r\n"
+		"  game ticks %lu, longer than a frame %lu, longest %lu us (at 40.25 MHz); window underruns %lu\r\n",
 		(unsigned long)xs.jobs, (unsigned long)xc_audio_errors, (unsigned long)xs.waiting,
-		(unsigned long)cyc_us(xs.svc_sum / j), (unsigned long)cyc_us(xs.svc_max),
-		(unsigned long)hist_pct(xs.svc_hist, 500), (unsigned long)hist_pct(xs.svc_hist, 990),
-		(unsigned long)hist_pct(xs.svc_hist, 999),
+		(unsigned long)cyc_us(xs.svc_sum / j), (unsigned long)cyc_us(xs.svc_max), (unsigned long)xs.svc_over_20ms,
 		(unsigned long)cyc_us(xs.dec_sum / j), (unsigned long)cyc_us(xs.dec_max),
 		(unsigned long)cyc_us(xs.gap_max), (unsigned long)xs.gaps_over_5ms, (unsigned long)xs.gaps_over_20ms,
-		(unsigned long)hist_pct(xs.gap_hist, 999));
+		(unsigned long)d[0], (unsigned long)pct(d[1], d[0]), (unsigned long)pct(d[2], d[0]), (unsigned long)pct(d[3], d[0]),
+		(unsigned long)d[4], (unsigned long)d[5], (unsigned long)(d[6] * 4u / 161u), (unsigned long)d[7]);
 	if(n < 0 || n >= size) return size - 1;
-	for(int k = 0; k < 2; k++) {
-		const uint32_t* h = k ? xs.gap_hist : xs.svc_hist;
-		int m = snprintf(b + n, size - n, "  %s ms histogram:", k ? "poll gap" : "service");
-		if(m < 0 || m >= size - n) return size - 1;
-		n += m;
-		for(int i = 0; i < XC_HIST; i++) {
-			if(!h[i]) continue;
-			m = snprintf(b + n, size - n, " %d:%lu", i, (unsigned long)h[i]);
-			if(m < 0 || m >= size - n) return size - 1;
-			n += m;
-		}
-		m = snprintf(b + n, size - n, "\r\n");
-		if(m < 0 || m >= size - n) return size - 1;
-		n += m;
-	}
 	return n;
 }
 
@@ -267,7 +259,6 @@ void xc_audio_poll(void)
 	if(gap > xs.gap_max) xs.gap_max = gap;
 	if(gap > 5000u * XC_CYC_PER_US) xs.gaps_over_5ms++;
 	if(gap > 20000u * XC_CYC_PER_US) xs.gaps_over_20ms++;
-	hist_add(xs.gap_hist, gap);
 	if(++status_polls >= 100000) {
 		status_polls = 0;
 		check_soc();
@@ -340,7 +331,7 @@ void xc_audio_poll(void)
 	xs.dec_sum += td;
 	if(svc > xs.svc_max) xs.svc_max = svc;
 	if(td > xs.dec_max) xs.dec_max = td;
-	hist_add(xs.svc_hist, svc);
+	if(svc > 20000u * XC_CYC_PER_US) xs.svc_over_20ms++;
 	xs.last_done = end;
 	xs.last_poll = end;          /* the service time is not a poll gap */
 	xs.first_poll_after_job = 1;

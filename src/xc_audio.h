@@ -16,6 +16,8 @@
 #define FPGA_CMD_XCA_ACKRESET  (0xc4)  /* clear the reset request */
 #define FPGA_CMD_XC_STATUS     (0xc5)  /* read: (null), {running, halted}, halt code (4 LE), halt address (4 LE) */
 #define FPGA_CMD_XC_RUN        (0xc6)  /* write: 1 = release the soft CPU, 0 = hold it in reset */
+#define FPGA_CMD_XC_PERF_SNAP  (0xc7)  /* snapshot of the FPGA performance counters */
+#define FPGA_CMD_XC_PERF       (0xc8)  /* read: (null), 8 counters (4 bytes LE each), see xc_top.v "perf" */
 
 void xc_run(uint8_t run);   /* release (1) / hold (0) the soft CPU; release once the image and the save are loaded */
 void xc_audio_init(void);   /* call when a Xeno Crisis cartridge is started */
