@@ -20,11 +20,11 @@ Track n is the game's music stream n. The length is the game's own version, for 
 | n | Game track | Game length | Notes |
 |---|---|---|---|
 | 1 | MUSIC_0_INTRO_VOICED | 0:31.6 | Played once (boot intro). Soundtrack: "Intro". |
-| 2 | MUSIC_10_ALARM | 0:05.4 | |
+| 2 | MUSIC_10_ALARM | 0:05.4 | Played once or looped, depending on the situation. |
 | 3 | MUSIC_1_TITLE | 0:36.4 | Loops. Soundtrack: "Title". |
 | 4 | MUSIC_2_INGAME_0_INTRO | 0:02.8 | Intro of 5. Soundtrack: "Perimeter (Area 1)" (its intro). |
 | 5 | MUSIC_2_INGAME_0_LOOP | 1:47.0 | Loops. Soundtrack: "Perimeter (Area 1)" (its loop). |
-| 6 | MUSIC_2_INGAME_1 | 2:39.8 | Soundtrack: "Facility (Area 2)". |
+| 6 | MUSIC_2_INGAME_1 | 2:39.8 | Loops. Soundtrack: "Facility (Area 2)". |
 | 7 | MUSIC_2_INGAME_2 | 2:08.6 | Soundtrack: "Dunes (Area 3)". |
 | 8 | MUSIC_2_INGAME_3_INTRO | 0:10.6 | Intro of 9. Soundtrack: "Nest (Area 4)" (its intro). |
 | 9 | MUSIC_2_INGAME_3_LOOP | 1:57.4 | Soundtrack: "Nest (Area 4)" (its loop). |
@@ -39,18 +39,18 @@ Track n is the game's music stream n. The length is the game's own version, for 
 | 18 | MUSIC_3_BOSS_2_INTRO | 0:00.8 | Intro of 19. Soundtrack: "Boss 3" (its intro). |
 | 19 | MUSIC_3_BOSS_2_LOOP | 0:40.8 | Soundtrack: "Boss 3" (its loop). |
 | 20 | MUSIC_3_BOSS_3 | 0:45.2 | Soundtrack: "Boss 4". |
-| 21 | MUSIC_4_CUTSCENE | 0:44.2 | Soundtrack: "Continue" (its first 44.1 s are this stream; the soundtrack piece goes on for 2:25). |
+| 21 | MUSIC_4_CUTSCENE | 0:44.2 | Loops. Soundtrack: "Continue" (its first 44.1 s are this stream; the soundtrack piece goes on for 2:25). |
 | 22 | MUSIC_5_SHOP | 0:22.4 | Loops. Soundtrack: "Stage Clear". |
-| 23 | MUSIC_6_CONTINUE | 0:34.8 | Not the soundtrack's "Continue" (that is 21). |
-| 24 | MUSIC_7_STAGE_CLEAR | 0:07.2 | Soundtrack: "Game Over" (the audio matches this stream, not 25). |
-| 25 | MUSIC_8_GAME_OVER | 0:12.0 | Soundtrack: "Cutscene". |
-| 26 | MUSIC_9_ENDING | 2:00.0 | |
+| 23 | MUSIC_6_CONTINUE | 0:34.8 | Loops. Soundtrack: "Upgrade" (the game's stream is one 30.3 s pass plus a 4.4 s ring-out; the soundtrack loops the pass). |
+| 24 | MUSIC_7_STAGE_CLEAR | 0:07.2 | Played once. Soundtrack: "Game Over" (the audio matches this stream, not 25). |
+| 25 | MUSIC_8_GAME_OVER | 0:12.0 | Played once. Soundtrack: "Cutscene". |
+| 26 | MUSIC_9_ENDING | 2:00.0 | Loops. |
 
-Some of the firmware's stream names do not match the soundtrack titles ("Game Over" is stream 24, "Continue" 21, "Stage Clear" 22, "Cutscene" 25): the slot is the stream whose music it is, found by comparing the audio.
+Some of the firmware's stream names do not match the soundtrack titles ("Game Over" is stream 24, "Continue" 21, "Stage Clear" 22, "Upgrade" 23, "Cutscene" 25): the slot is the stream whose music it is, found by comparing the audio.
 
 ## How tracks are played
 
-- **Looping:** the game decides whether a track loops. A looping track plays with MSU-1 repeat, so set the `.pcm` loop point where the loop should restart (0 = the whole track, which is what the game itself does). A track the game plays once (the voiced intro, jingles) ignores the loop point.
+- **Looping:** the game decides whether a track loops (the Notes column says which, from the firmware's own calls). A looping track plays with MSU-1 repeat, so set the `.pcm` loop point where the loop should restart (0 = the whole track, which is what the game itself does). A track the game plays once (the voiced intro, jingles) ignores the loop point.
 - **Intro + loop pairs** (4/5, 8/9, 10/11, 12/13, 14/15, 18/19): the intro plays once, and the loop part starts as soon as the intro `.pcm` ends. The intro's length does not have to match the game's. If the soundtrack has the two parts as one piece, either split it at the same point, or put the whole piece in the loop track with a loop point after the intro and an empty or very short intro track.
 - **Missing tracks** are silent; the game carries on.
 - **Pausing** the game pauses the MSU-1 track, and unpausing continues it.
