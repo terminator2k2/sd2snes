@@ -24,4 +24,8 @@ void xc_audio_service(void);/* same, from inside long MCU jobs (FPGA deselected)
 void xc_audio_report(void); /* when the game is left: timing statistics to the UART and /sd2snes/xcaudio.txt */
 extern uint32_t xc_audio_packets, xc_audio_errors;
 
+/* xc_load.c: loading a 128 KB kernel ROM builds the image from /sd2snes/xenocrisis_rp2040.bin + /sd2snes/xc_soc.bin */
+const char* xc_load_image(void);   /* NULL when done, else the name of the missing / wrong file */
+void xc_load_dump_save(void);      /* no .srm: seed the save RAM from the dump's save area */
+
 #endif

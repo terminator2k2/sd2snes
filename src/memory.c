@@ -661,8 +661,17 @@ static void load_saveram(const load_ctx_t *c) {
     // powerslide relies on the init value to be 00.
     sram_memset(SRAM_SAVE_ADDR, romprops.ramsize_bytes, romprops.has_gsu ? 0x00 : 0xFF);
     if (romprops.sramsize_bytes) migrate_and_load_srm(filename, SRAM_SAVE_ADDR);
+
+#ifdef CONFIG_MK3
+    /* Xeno Crisis: initialize the save from the RP2040 flash dump
+       when no existing .srm file was found. */
+    if (romprops.has_xc && file_res == FR_NO_FILE) {
+      xc_load_dump_save();
+    }
+#endif
+
     /* file not found error is ok (SRM file might not exist yet) */
-    if(file_res == FR_NO_FILE) file_res = 0;
+    if (file_res == FR_NO_FILE) file_res = 0;
     /* A core without the virtual battery cannot pass the factory check program's
        RTC BACKUP test -- that test IS the battery -- and the cart then loops the
        factory ritual instead of booting retail.  Plant the signature the check
@@ -808,6 +817,7 @@ static void load_set_features(const load_ctx_t *c) {
   }
 #endif
 }
+
 /* Chip BIOSes and firmware blobs the staged ROM needs: BS-X, Sufami Turbo, DSPx.
    Takes ticksstart only to close out the load timer printed here. */
 static uint8_t load_st018(const uint8_t *filename);
@@ -1150,6 +1160,7 @@ static uint32_t load_open(load_ctx_t *c) {
     if(!load_sfrom_info(&rom_off, &rom_size, file_handle.fsize)) {
       file_close();
       return load_abort_missing(flags, MENU_ERR_FS, path_leaf((const char*)filename));
+
     }
     c->file_offset = rom_off;
     c->filesize    = rom_size;
@@ -1601,6 +1612,17 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   }
   load_reconfigure_fpga(&c);
   load_stream(&c);
+
+#ifdef CONFIG_MK3
+  /* Xeno Crisis: build the complete image from the 128 KB SNES ROM.
+     Larger prebuilt images do not require rebuilding. */
+  if (romprops.has_xc && c.filesize == 0x20000) {
+    const char *missing = xc_load_image();
+    if (missing) {
+      return load_abort_missing(flags, MENU_ERR_SUPPLFILE, missing);
+    }
+  }
+#endif
 
   /* Single-pass recore (optimization): decide a cartridge-type change RIGHT AFTER
      the stream, BEFORE the expensive tail (BSX/features/SaveRAM CRC/init 196KB

@@ -417,9 +417,17 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
         props->fpga_conf = FPGA_ST0018;
       }
 /* Xeno Crisis (Bitmap Bureau): RP2040 coprocessor.
-         Both MK3 MCU types are supported:
-         STM32F401 supports Opus music decoding.
-         LPC1756 supports gameplay and sound effects without Opus music. */
+         The user can load the 128 KB SNES ROM directly.
+         load_rom() combines it with /sd2snes/xenocrisis_rp2040.bin
+         and /sd2snes/xc_soc.bin using xc_load.c.
+         Prebuilt Xeno Crisis images are also supported.
+
+         Saves use the RP2040 flash save area, mapped to the
+         beginning of SRAM (32 KB .srm).
+
+         Both MK3 MCU variants are supported:
+         STM32F401 (firmware.stm): gameplay, sound effects and Opus music.
+         LPC1756 (firmware.im3): gameplay and sound effects, without music. */
 #ifdef CONFIG_MK3
       else if (header->map == 0x30 && header->carttype == 0x63
                && header->maker[0] == 'B' && header->maker[1] == 'M'
