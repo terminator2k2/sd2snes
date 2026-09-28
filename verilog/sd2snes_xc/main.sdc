@@ -153,4 +153,9 @@ set_false_path  -from  [get_clocks {SPI_SCK}]  -to  [get_clocks {snes_pll|altpll
 # Every crossing is a toggle through a two-flop synchronizer (xc_bridge req/ack, decode IRQ, reset) or
 # data that is stable while the other side samples it (bridge operation fields and buffers), plus
 # quasi-static status bits for the MCU. See xc_bridge.v.
+# soft CPU clock (clk[1]) to itself, as for clk[0] (clears Critical Warning 332169)
+set_clock_uncertainty -rise_from [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[1]}]  0.020
+set_clock_uncertainty -rise_from [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[1]}]  0.020
+set_clock_uncertainty -fall_from [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[1]}]  0.020
+set_clock_uncertainty -fall_from [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[1]}]  0.020
 set_clock_groups -asynchronous -group [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[0]}] -group [get_clocks {snes_pll|altpll_component|auto_generated|pll1|clk[1]}]
