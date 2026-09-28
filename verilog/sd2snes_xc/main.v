@@ -411,7 +411,9 @@ wire [31:0] xc_halt_code, xc_halt_addr;
 wire        xc_perf_snap;
 wire [255:0] xc_perf;
 
-xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(1)) snes_xc (   // 40.25 MHz, must match the PLL's clk1
+// soft CPU clock 40.25 MHz (must match the PLL's clk1); caches: D$ 2^DIDX sets, I$ 2^IIDX sets (x 2 ways x 32 B)
+// = 16 KB each. If Quartus misses timing on clk[1], try IIDX 7 (8 KB I$: same M9K count as a 4 KB one).
+xc_top #(.SOC_CLK_NUM(161), .SOC_CLK_DEN(4), .STATS(1), .DIDX(8), .IIDX(8)) snes_xc (
   .clk2(CLK2),
   .clk_soc(CLK_SOC),
   .rst2(SNES_DEADr),

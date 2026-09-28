@@ -60,8 +60,9 @@ Status: everything is simulated and checked except what needs Quartus or hardwar
 
 ### Caches
 
-- **I-cache:** 4 KB, 2-way, 32-byte lines. It caches flash and bootrom. Code fetched from RAM goes through the D-cache instead.
-- **D-cache:** 8 KB, 2-way, write-back. It caches RAM, flash and bootrom.
+- **I-cache:** 16 KB, 2-way, 32-byte lines (`IIDX` = 8; it was 4 KB). It caches flash and bootrom. Code fetched from RAM goes through the D-cache instead.
+- **D-cache:** 16 KB, 2-way, write-back (`DIDX` = 8; it was 8 KB). It caches RAM, flash and bootrom.
+- **Deferred write-back:** on a miss that evicts a dirty line, the victim goes into the bridge's write buffer, the fill is done first, and the victim is written to the SRAM chip afterwards while the core runs on cache hits. The next access that needs the bridge waits for that write, so bridge operations stay in order.
 - **Hits** answer in the same cycle: the cache RAMs are addressed with `bus_next_addr`, so there are no wait states.
 - **Stores:** after a store, the following D-cache access waits one cycle (read-during-write).
 - **Aliases:** the flash aliases (`0x10`–`0x13`) and the RAM alias (`0x21`) fold into one cache key.
@@ -156,6 +157,18 @@ FPGA commands (`mcu_cmd.v`):
 | `$C6` XC_RUN | write: 1 = release the soft CPU, 0 = hold it |
 | `$C7` XC_PERF_SNAP | snapshot of the performance counters |
 | `$C8` XC_PERF | read: null, 8 counters (4 bytes LE each) |
+
+**Slowdowns and flicker (hardware counters, first log):** in 30.8 s of play the soft CPU spent 42% of its cycles waiting for memory (instruction fetches 14%, flash data 8%, RAM data 20%), and 92 of 1,711 game ticks (5.4%) took longer than one SNES frame (longest 25 ms). Quartus: `clk[1]` Fmax 41.26 MHz (slack 0.61 ns at 40.25 MHz, worst path into the stack pointer), so the clock cannot go up; 81% of the logic elements and 28% of the memory bits are used. The window underran 42 times in 30 s, the same rate as in the co-simulation (reads right after a post, while the kernel polls). So the fix is fewer and shorter memory stalls. The co-simulation with the bus latencies doubled (RAM 14 CLK2 cycles per byte, up to 56 cycles for a free SNES slot), 600 frames:
+
+| Caches | Stalled on memory | Tick p95 / p99 / max | Ticks longer than a frame |
+|---|---|---|---|
+| 4 KB I$ + 8 KB D$ (before) | 25.6% | 10.88 / 13.74 / 29.9 ms | 3 of 580 |
+| 4 KB + 8 KB, deferred write-back | 22.6% | 10.30 / 12.72 / 25.9 ms | 3 of 579 |
+| 8 KB + 16 KB | 16.0% | 9.39 / 12.09 / 29.2 ms | 2 of 580 |
+| 16 KB + 16 KB | 12.6% | 9.14 / 11.76 / 29.0 ms | 1 of 580 |
+| **16 KB + 16 KB, deferred write-back** | **10.5%** | **8.66 / 11.38 / 25.9 ms** | **1 of 581** |
+
+All runs: 0 reference mismatches, 0 DMA mismatches. With the normal bus latencies (900 frames): stalled 8.2% instead of 20.5%, tick p95 / p99 8.45 / 10.95 ms instead of 9.38 / 11.71, screenshots identical up to frame 150 (after that the game's timing differs, as before), 101.7 M core reads and 822 KB of DMA checked with 0 mismatches. The caches take 16 more M9K blocks (about 50 of 56). If `clk[1]` misses timing with the 16 KB I-cache, `IIDX` 7 (8 KB) uses no more M9K blocks than the old 4 KB one.
 
 **Performance counters** (`xc_top.v`, "perf"; the MCU logs them in `xcaudio.txt`, as differences since the previous log): SoC cycles; cycles stalled on instruction fetches, on flash data and on RAM data; game ticks (the firmware read the SNES end-of-frame message and posted its next stream descriptor), ticks longer than one SNES frame (16.64 ms), the longest tick; and window underruns (SNES reads that found the prefetch ring empty while a descriptor was queued). They were added after the first hardware reports of slowdowns and flicker at the top of the screen, which the RTL co-simulation doesn't show (3–5 ticks longer than a frame in 900 frames). In the co-simulation they match the bus monitor's own counts (e.g. 123 ticks, longest 456,420 vs 456,421 cycles, 1 underrun). The SoC counters are copied on a synchronized toggle; `clk[0]` and `clk[1]` are asynchronous clock groups in `main.sdc`, so the MCU's read of the static snapshot is not timed.
 

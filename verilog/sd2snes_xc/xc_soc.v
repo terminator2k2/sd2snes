@@ -2,7 +2,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 // xc_soc: the RP2040 core 0 replacement for Xeno Crisis on sd2snes mk3 (clk_soc domain).
 //
-//   xc_m0 core + 4 KB I-cache + 8 KB write-back D-cache (2-way, 32-byte lines), a memory controller,
+//   xc_m0 core + I-cache + write-back D-cache (2-way, 32-byte lines; sizes: parameters IIDX, DIDX), a memory controller,
 //   the SoC-local peripherals (timer, SIO subset with the hardware divider, NVIC/VTOR, BRR encoder,
 //   mixer tick, debug/panic port) and xc_bridge operations for everything on the sd2snes side
 //   (PSRAM, SRAM chip, $3000 window, decode mailbox).
@@ -34,7 +34,9 @@
 module xc_soc #(
   parameter CLK_NUM = 40,            // clk frequency = CLK_NUM / CLK_DEN MHz (sd2snes PLL: 161/4 = 40.25 MHz)
   parameter CLK_DEN = 1,
-  parameter CORE_DEBUG = 0          // xc_m0 debug read port and counters (lockstep harness only)
+  parameter CORE_DEBUG = 0,         // xc_m0 debug read port and counters (lockstep harness only)
+  parameter DIDX = 7,               // D-cache sets = 2^DIDX (2 ways x 32 B lines): 7 = 8 KB, 8 = 16 KB
+  parameter IIDX = 6                // I-cache sets = 2^IIDX: 6 = 4 KB, 7 = 8 KB, 8 = 16 KB
 ) (
   input clk,
   input rst,
@@ -220,8 +222,9 @@ endfunction
 //------------------------------------------------------------------------------
 // Caches
 //------------------------------------------------------------------------------
-localparam DIDX = 7, DTAG = 14;     // D$: 128 sets x 2 ways x 32 B = 8 KB, tag = key[25:12]
-localparam IIDX = 6, ITAG = 15;     // I$: 64 sets x 2 ways x 32 B = 4 KB, tag = key[25:11]
+localparam DTAG = 21 - DIDX;        // D$: 2^DIDX sets x 2 ways x 32 B, tag = key[25:DIDX+5]
+localparam ITAG = 21 - IIDX;        // I$: 2^IIDX sets x 2 ways x 32 B, tag = key[25:IIDX+5]
+localparam MIDX = (DIDX > IIDX) ? DIDX : IIDX;
 
 reg ctl_rd;                         // controller drives the cache read address
 reg [25:0] ctl_key;
@@ -244,14 +247,14 @@ reg [ITAG+1:0] i_twdata;
 reg lru_reset;
 wire d_lru_way, i_lru_way;
 
-xc_cache #(.SETS(128), .IDXW(DIDX), .TAGW(DTAG)) dcache (
+xc_cache #(.SETS(1 << DIDX), .IDXW(DIDX), .TAGW(DTAG)) dcache (
   .clk(clk), .rd_word(rd_key[DIDX+4:2]), .q0(dq0), .q1(dq1), .t0(dt0), .t1(dt1),
   .dwe(d_dwe), .dway(d_dway), .dword(d_dword), .dbe(d_dbe), .dwdata(d_dwdata),
   .twe(d_twe), .tway(d_tway), .tset(d_tset), .twdata(d_twdata),
   .lru_set(key_cur[DIDX+4:5]), .lru_way(d_lru_way), .touch(d_touch), .touch_set(d_touch_set), .touch_way(d_touch_way),
   .inv_all_lru(lru_reset)
 );
-xc_cache #(.SETS(64), .IDXW(IIDX), .TAGW(ITAG)) icache (
+xc_cache #(.SETS(1 << IIDX), .IDXW(IIDX), .TAGW(ITAG)) icache (
   .clk(clk), .rd_word(rd_key[IIDX+4:2]), .q0(iq0), .q1(iq1), .t0(it0), .t1(it1),
   .dwe(i_dwe), .dway(i_dway), .dword(i_dword), .dbe(4'b1111), .dwdata(i_dwdata),
   .twe(i_twe), .tway(i_tway), .tset(i_tset), .twdata(i_twdata),
@@ -268,10 +271,10 @@ always @(posedge clk) begin
   i_stale <= i_dwe | i_twe;
 end
 wire rd_match = (rd_key_q[25:2] == key_cur[25:2]);
-wire d_hit0 = dt0[DTAG+1] && dt0[DTAG-1:0] == key_cur[25:12];
-wire d_hit1 = dt1[DTAG+1] && dt1[DTAG-1:0] == key_cur[25:12];
-wire i_hit0 = it0[ITAG+1] && it0[ITAG-1:0] == key_cur[25:11];
-wire i_hit1 = it1[ITAG+1] && it1[ITAG-1:0] == key_cur[25:11];
+wire d_hit0 = dt0[DTAG+1] && dt0[DTAG-1:0] == key_cur[25:DIDX+5];
+wire d_hit1 = dt1[DTAG+1] && dt1[DTAG-1:0] == key_cur[25:DIDX+5];
+wire i_hit0 = it0[ITAG+1] && it0[ITAG-1:0] == key_cur[25:IIDX+5];
+wire i_hit1 = it1[ITAG+1] && it1[ITAG-1:0] == key_cur[25:IIDX+5];
 wire d_look = rd_match & ~d_stale;
 wire i_look = rd_match & ~i_stale;
 wire d_hit = d_look & (d_hit0 | d_hit1);
@@ -339,11 +342,18 @@ localparam [4:0] S_INIT_TAGS = 5'd0, S_INIT_CLR = 5'd1, S_INIT_CLRW = 5'd2, S_IN
                  S_CLEAN = 5'd16, S_CLEAN_CHK = 5'd17, S_CLEAN_NEXT = 5'd18, S_HALT = 5'd19, S_SEL = 5'd20, S_RELEASE = 5'd21, S_POST = 5'd22, S_CLEAN_WAIT = 5'd23, S_UNC_RD = 5'd24, S_UNC_RD2 = 5'd25;
 
 reg [4:0] st, wb_ret;
-reg [8:0] cnt;
+reg [9:0] cnt;
 reg [23:0] clr_addr;
 
 // miss / write-back bookkeeping
 reg m_icache;                       // miss is in the I$
+// Deferred write-back: a dirty victim is copied into the bridge's write buffer, the fill goes first, and the
+// victim is written to SRAM after it, while the core continues on cache hits. Any access that needs the
+// bridge waits until that write is done (bridge operations stay in order: the SRAM always sees the victim
+// before anything can read that line again).
+reg bg_pend;                        // victim in the bridge write buffer, write not started yet
+reg bg_busy;                        // victim write in progress
+reg [23:0] bg_addr;
 reg m_way;
 reg [25:0] m_key;                   // line key of the miss
 wire [24:0] m_phys = key_phys(m_key);
@@ -467,7 +477,9 @@ always @(posedge clk) begin
   dbg_char_valid <= 1'b0;
 
   exc_irq_d <= irq_lowest;
+  if(bg_busy && op_done) bg_busy <= 1'b0;
   if(rst) begin
+    bg_pend <= 1'b0; bg_busy <= 1'b0;
     st <= S_INIT_TAGS;
     cnt <= 9'd0;
     core_rst <= 1'b1;
@@ -496,13 +508,13 @@ always @(posedge clk) begin
     case(st)
       //------------------------------------------------------------ start-up
       S_INIT_TAGS: begin
-        // invalidate both ways of every set of both caches (256 cycles)
+        // invalidate both ways of every set of both caches (2 x the larger number of sets, in cycles)
         d_twe <= 1'b1; d_tway <= cnt[0]; d_tset <= cnt[DIDX:1]; d_twdata <= 0;
         wb_we <= 1'b1; wb_addr <= cnt[2:0]; wb_data <= 32'd0;     // zero data words for the SRAM clear
         rbi <= 3'd0;
         i_twe <= 1'b1; i_tway <= cnt[0]; i_tset <= cnt[IIDX:1]; i_twdata <= 0;
         cnt <= cnt + 9'd1;
-        if(cnt == 9'd255) begin st <= S_INIT_CLR; clr_addr <= 24'h008000; end
+        if(cnt == (10'd2 << MIDX) - 10'd1) begin st <= S_INIT_CLR; clr_addr <= 24'h008000; end
       end
       S_INIT_CLR: begin
         op_kind <= OP_SRAM_WR; op_addr <= clr_addr; op_len <= 6'd32; op_start <= 1'b1;
@@ -544,7 +556,7 @@ always @(posedge clk) begin
             end else if(use_dc) begin
               if(bus_we && cls == C_RAM) begin
                 d_dwe <= 1'b1; d_dway <= d_hit1; d_dword <= key_cur[DIDX+4:2]; d_dbe <= be; d_dwdata <= wd_lanes;
-                d_twe <= 1'b1; d_tway <= d_hit1; d_tset <= key_cur[DIDX+4:5]; d_twdata <= {1'b1, 1'b1, key_cur[25:12]};
+                d_twe <= 1'b1; d_tway <= d_hit1; d_tset <= key_cur[DIDX+4:5]; d_twdata <= {1'b1, 1'b1, key_cur[25:DIDX+5]};
               end
               if(d_hit) begin d_touch <= 1'b1; d_touch_set <= key_cur[DIDX+4:5]; d_touch_way <= d_hit1; end
             end else begin
@@ -584,6 +596,8 @@ always @(posedge clk) begin
                 default: ;
               endcase
             end
+          end else if(bg_busy) begin
+            // the deferred write-back still has the bridge
           end else if(use_ic) begin
             if(i_look) begin
               m_icache <= 1'b1; m_key <= {key_cur[25:5], 5'd0};
@@ -667,11 +681,17 @@ always @(posedge clk) begin
         wb_i <= wb_i + 4'd1;
         if(wb_i == 4'd8) begin
           ctl_rd <= 1'b0;
-          op_kind <= OP_SRAM_WR; op_addr <= wb_phys[23:0]; op_len <= 6'd32;
-          op_start <= 1'b1;             // the last data word is written on the same edge
           // clear the dirty bit now; the line stays valid
           d_twe <= 1'b1; d_tway <= wb_way; d_tset <= wb_set; d_twdata <= {1'b1, 1'b0, wb_tag};
-          st <= S_WB_OP;
+          if(wb_ret == S_FILL) begin
+            // miss: fill first, write the victim afterwards (the last data word is written on this edge)
+            bg_pend <= 1'b1; bg_addr <= wb_phys[23:0];
+            st <= S_FILL;
+          end else begin
+            op_kind <= OP_SRAM_WR; op_addr <= wb_phys[23:0]; op_len <= 6'd32;
+            op_start <= 1'b1;           // the last data word is written on the same edge
+            st <= S_WB_OP;
+          end
         end
       end
       S_WB_OP: if(op_done) st <= wb_ret;
@@ -698,8 +718,13 @@ always @(posedge clk) begin
             d_dwe <= 1'b1; d_dway <= m_way; d_dword <= {m_key[DIDX+4:5], cnt[2:0] - 3'd2}; d_dbe <= 4'b1111; d_dwdata <= rb_q;
           end
           if(cnt == 9'd9) begin
-            if(m_icache) begin i_twe <= 1'b1; i_tway <= m_way; i_tset <= m_key[IIDX+4:5]; i_twdata <= {1'b1, 1'b0, m_key[25:11]}; end
-            else begin d_twe <= 1'b1; d_tway <= m_way; d_tset <= m_key[DIDX+4:5]; d_twdata <= {1'b1, 1'b0, m_key[25:12]}; end
+            if(m_icache) begin i_twe <= 1'b1; i_tway <= m_way; i_tset <= m_key[IIDX+4:5]; i_twdata <= {1'b1, 1'b0, m_key[25:IIDX+5]}; end
+            else begin d_twe <= 1'b1; d_tway <= m_way; d_tset <= m_key[DIDX+4:5]; d_twdata <= {1'b1, 1'b0, m_key[25:DIDX+5]}; end
+            if(bg_pend) begin
+              // the fill is complete: now write the victim from the bridge's write buffer
+              op_kind <= OP_SRAM_WR; op_addr <= bg_addr; op_len <= 6'd32; op_start <= 1'b1;
+              bg_pend <= 1'b0; bg_busy <= 1'b1;
+            end
             st <= S_RETRY;
           end
         end
@@ -744,18 +769,18 @@ always @(posedge clk) begin
       S_CLEAN: begin
         // read the tags of the next line (or set) to check
         ctl_rd <= 1'b1;
-        ctl_key <= cl_all ? {14'd0, cl_set, 5'd0} : cl_key;
+        ctl_key <= cl_all ? {{DTAG{1'b0}}, cl_set, 5'd0} : cl_key;
         st <= S_CLEAN_WAIT;
       end
       S_CLEAN_WAIT: st <= S_CLEAN_CHK;   // the cache reads ctl_key at the end of this cycle
       S_CLEAN_CHK: begin
         // tags for ctl_key are valid now
         ctl_rd <= 1'b1;
-        if(cl_all ? (dt0[DTAG+1] & dt0[DTAG]) : (dt0[DTAG+1] & dt0[DTAG] & dt0[DTAG-1:0] == cl_key[25:12])) begin
+        if(cl_all ? (dt0[DTAG+1] & dt0[DTAG]) : (dt0[DTAG+1] & dt0[DTAG] & dt0[DTAG-1:0] == cl_key[25:DIDX+5])) begin
           wb_set <= cl_all ? cl_set : cl_key[DIDX+4:5]; wb_way <= 1'b0; wb_tag <= dt0[DTAG-1:0]; wb_i <= 4'd0; wb_ret <= S_CLEAN;
           ctl_key <= {dt0[DTAG-1:0], cl_all ? cl_set : cl_key[DIDX+4:5], 5'd0};
           st <= S_WB_RD;
-        end else if(cl_all ? (dt1[DTAG+1] & dt1[DTAG]) : (dt1[DTAG+1] & dt1[DTAG] & dt1[DTAG-1:0] == cl_key[25:12])) begin
+        end else if(cl_all ? (dt1[DTAG+1] & dt1[DTAG]) : (dt1[DTAG+1] & dt1[DTAG] & dt1[DTAG-1:0] == cl_key[25:DIDX+5])) begin
           wb_set <= cl_all ? cl_set : cl_key[DIDX+4:5]; wb_way <= 1'b1; wb_tag <= dt1[DTAG-1:0]; wb_i <= 4'd0; wb_ret <= S_CLEAN;
           ctl_key <= {dt1[DTAG-1:0], cl_all ? cl_set : cl_key[DIDX+4:5], 5'd0};
           st <= S_WB_RD;
