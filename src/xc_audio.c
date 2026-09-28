@@ -21,8 +21,8 @@
  * The decoder is never reset between tracks (the firmware doesn't either).
  *
  * Statistics (DWT cycle counter): service time per packet, decode time, poll gaps, and how often the mixer
- * was already waiting for the next packet. Printed on the UART every 1000 packets and written to
- * /sd2snes/xcaudio.txt when the game is left (xc_audio_report()).
+ * was already waiting for the next packet. Printed on the UART and written to /sd2snes/xcaudio.txt every
+ * 1,500 packets (30 s of music) and when the game is left (long reset, reset to menu: xc_audio_report()).
  */
 #include <string.h>
 #include "config.h"
@@ -57,11 +57,14 @@ uint32_t xc_audio_packets, xc_audio_errors;
 static uint32_t status_polls;
 static uint8_t halt_reported;
 static uint8_t active;
+static uint8_t in_service;     /* xc_audio_poll() called from inside another MCU job (CRC, save) */
+static uint32_t log_writes;
 
 static struct {
 	uint32_t last_poll;          /* cycle count at the last poll */
 	uint32_t last_done;          /* cycle count at the end of the last job */
 	uint8_t first_poll_after_job;
+	uint8_t log_due;
 	uint32_t jobs, waiting;      /* jobs; jobs already waiting at the first poll after the previous one */
 	uint64_t svc_sum, dec_sum;   /* cycles: whole service (read packet .. done), decode alone */
 	uint32_t svc_max, dec_max, gap_max;
@@ -111,6 +114,8 @@ void xc_audio_init(void)
 	status_polls = 0;
 	halt_reported = 0;
 	memset(&xs, 0, sizeof(xs));
+	log_writes = 0;
+	in_service = 0;
 #ifdef XC_CYCLES_ON
 	XC_CYCLES_ON();
 #endif
@@ -176,23 +181,34 @@ static int format_stats(char* b, int size)
 /* when the game is left: statistics to the UART and to /sd2snes/xcaudio.txt */
 static char stats_buf[1024] IN_AHBRAM;
 
-void xc_audio_report(void)
+
+/* statistics to the UART and to /sd2snes/xcaudio.txt (rewritten each time) */
+static void write_log(const char* why)
 {
-	char* buf = stats_buf;
-	if(!active) return;
-	active = 0;
-	int n = format_stats(buf, sizeof(stats_buf));
-	printf("%s", buf);
+	int n = snprintf(stats_buf, sizeof(stats_buf), "[%s, log #%lu]\r\n", why, (unsigned long)++log_writes);
+	if(n < 0 || n >= (int)sizeof(stats_buf)) n = 0;
+	n += format_stats(stats_buf + n, sizeof(stats_buf) - n);
+	printf("%s", stats_buf);
 #ifndef XC_HOST_TEST
 	FIL f;
-	UINT bw;
-	if(f_open(&f, "/sd2snes/xcaudio.txt", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
-		f_write(&f, buf, n, &bw);
-		f_close(&f);
+	UINT bw = 0;
+	FRESULT r = f_open(&f, "/sd2snes/xcaudio.txt", FA_WRITE | FA_CREATE_ALWAYS);
+	if(r == FR_OK) {
+		r = f_write(&f, stats_buf, n, &bw);
+		FRESULT rc = f_close(&f);
+		if(r == FR_OK) r = rc;
 	}
+	if(r != FR_OK) printf("xcaudio.txt: write failed (FatFs error %d)\n", (int)r);
 #else
 	(void)n;
 #endif
+}
+
+void xc_audio_report(void)
+{
+	if(!active) return;
+	active = 0;
+	write_log("game left");
 }
 
 static uint8_t read_status(uint16_t* len)
@@ -323,9 +339,13 @@ void xc_audio_poll(void)
 	xs.last_done = end;
 	xs.last_poll = end;          /* the service time is not a poll gap */
 	xs.first_poll_after_job = 1;
-	if(xs.jobs % 1000 == 0) {
-		format_stats(stats_buf, sizeof(stats_buf));
-		printf("%s", stats_buf);
+	/* every 1,500 packets (30 s of music): also written during play, so the log exists even if the console
+	   is just switched off. Not from inside the CRC or a save (the save has a file open); the next main loop
+	   job then writes it. The mixer holds up to 100 ms of decoded music, more than the SD write takes. */
+	if(xs.jobs % 1500 == 0) xs.log_due = 1;
+	if(xs.log_due && !in_service) {
+		xs.log_due = 0;
+		write_log("during play");
 		xs.last_poll = XC_CYCLES();
 	}
 }
@@ -333,5 +353,8 @@ void xc_audio_poll(void)
 /* for long MCU jobs (SRAM CRC): serve a waiting job; the caller has deselected the FPGA */
 void xc_audio_service(void)
 {
-	if(active) xc_audio_poll();
+	if(!active) return;
+	in_service = 1;
+	xc_audio_poll();
+	in_service = 0;
 }
