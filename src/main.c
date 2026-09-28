@@ -575,9 +575,16 @@ WD_SITE(WD_SITE_SRAM_REL);
         
         if(getticks() > loop_ticks + 25) {
           loop_ticks = getticks();
- //         sram_reliable();
+//        sram_reliable();
+
           WD_SITE(WD_SITE_CIC_PRINT);
-          printf("%s ", get_cic_statename(get_cic_state()));
+
+#ifdef CONFIG_MK3
+          /* Xeno Crisis: skip the expensive CIC state debug print. */
+          if (!romprops.has_xc)
+#endif
+            printf("%s ", get_cic_statename(get_cic_state()));
+
           WD_SITE(WD_SITE_SNES_LOOP);
           cmd=snes_main_loop();
           if (usb_cmd && !cmd) cmd = usb_cmd;
