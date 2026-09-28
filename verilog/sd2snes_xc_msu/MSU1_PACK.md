@@ -71,3 +71,7 @@ python3 -c "import struct,sys; sys.stdout.buffer.write(b'MSU1'+struct.pack('<I',
 For a looping track, put the loop point (in 44.1 kHz samples from the start of the audio data) in place of the `0`. msupcm++ does all of this from a JSON track list, if you prefer a tool.
 
 Saving works as usual (`.srm`). While a pack is used, the firmware checks the save RAM once a second during play and writes the `.srm` when it changed.
+
+## A pack from the game's own music
+
+`tools/mkgamepack.py` builds all 26 tracks from the Opus streams in your RP2040 dump, so they sound exactly like the game (but without the SNES sound chip's resampling). One decoder runs through each play sequence as in the game (intro -> loop -> loop), the loops are sample-exact (after the jump back, the output is identical to the game's continued decoding), and one common gain keeps the game's balance between tracks (area themes about -20 LUFS). The music is encoded super-wideband (up to 12 kHz), as in the game.
