@@ -5,9 +5,9 @@
  *
  *   /sd2snes/xenocrisis_rp2040.bin  the RP2040 flash dump (16 MB, supplied by the user, like the DSP or BS-X files)
  *   /sd2snes/xc_soc.bin             the soft CPU support files, shipped with the firmware next to fpga_xc.bi3:
- *                                   replacement bootrom and firmware additions (socfw/build.sh)
+ *                                   replacement bootrom and firmware additions (built with the firmware: src/xc_soc/)
  *
- * PSRAM layout (the same as socfw/xc_build_image.py produces, which remains usable: a file larger than 128 KB is
+ * PSRAM layout (the same as src/xc_soc/xc_build_image.py produces, which remains usable: a file larger than 128 KB is
  * taken as such a prebuilt image and loaded as is):
  *
  *   0x000000-0x01FFFF  SNES kernel ROM

@@ -20,7 +20,7 @@ FPGAPATH := verilog
 MK2EXT := bit
 MK3EXT := bi3
 MK2CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb sgb_msu
-MK3CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb st0011 st0018 col20
+MK3CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb st0011 st0018 col20 xc xc_msu
 
 MK2FPGA := $(foreach C,$(MK2CORES),$(FPGAPATH)/sd2snes_$C/fpga_$C.$(MK2EXT))
 MK3FPGA := $(foreach C,$(MK3CORES),$(FPGAPATH)/sd2snes_$C/fpga_$C.$(MK3EXT))
@@ -81,6 +81,7 @@ endif
 	cp $(MK2MCUPATH)/$(MK2MCU) $(TARGET)
 	cp $(MK3MCUPATH)/$(MK3MCU) $(TARGET)
 	cp $(STMMCUPATH)/$(STMMCU) $(TARGET)
+	cp $(STMMCUPATH)/xc_soc.bin $(TARGET)
 	cp $(MENUPATH)/$(MK2MENU) $(TARGET)
 	cp $(MENUPATH)/$(MK3MENU) $(TARGET)
 ifneq ($(SAVESTATEPATH),)

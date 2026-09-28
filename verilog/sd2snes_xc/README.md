@@ -43,7 +43,7 @@ Status: everything is simulated and checked except what needs Quartus or hardwar
 | `0xD20000-0xD23FFF` | replacement bootrom (`xc_bootrom.bin`) | soft CPU, address 0 |
 | `0xD24000-0xD27FFF` | RP2040 flash `0xF00000-0xF03FFF` (firmware additions) | soft CPU |
 
-- `socfw/xc_build_image.py` builds this 13.8 MB file from the kernel dump and the RP2040 flash dump. It applies the SoC patches as `xc_patch_image.py` does.
+- `src/xc_soc/xc_build_image.py` builds this 13.8 MB file from the kernel dump and the RP2040 flash dump. It applies the SoC patches as `xc_patch_image.py` does.
 - The layout keeps clear of the PSRAM areas the MCU uses while a game runs: 0xE00000 and up (menu, save states, SPC dumps).
 - The cheat area at 0xD00000 is used. The MCU skips cheats and save states for this cartridge; the core has no cheat engine anyway.
 
@@ -94,7 +94,7 @@ The SoC is held in reset while the SNES is in reset (`SNES_DEADr`, like the cart
 - Descriptors are 8 deep, `{RAM address, length ≤ 64 KB}` or one immediate byte.
 - A DMA reader on the SRAM chip fills the 512-byte ring (`xc_stream`), which the SNES reads.
 - An SRAM arbiter gives the DMA priority over the SoC, one byte at a time.
-- The register semantics are those of MesenCE's SoC mode (`socfw/xc_soc.h`).
+- The register semantics are those of MesenCE's SoC mode (`src/xc_soc/xc_soc.h`).
 
 ## MCU (sd2snes `src/`)
 
@@ -140,7 +140,7 @@ The SoC is held in reset while the SNES is in reset (`SNES_DEADr`, like the cart
   | 15–18 ms + 20–40 ms MCU pause every 250 ms | 0 | 0 |
 
   The old mixer also stopped mixing entirely while a decode was out, so the BRR rings (about 128 ms) drained during long MCU pauses and the sound effects stuttered with the music. Changes:
-  - **Mixer** (`socfw/xc_mix.c`, needs a rebuilt image): mixes the sound effects and the already decoded music while a packet is being decoded (the slot for that packet is left out), and sends the next packet as soon as a result arrives instead of at the next tick. The BRR rings now stay full in every run above; an MCU pause only reaches the music once the decoded PCM (up to 100 ms) is used up. With a 6 ms service time the output is identical to the old mixer (correlation 1.0000 at zero lag). RTL run (900 frames, 15 ms): 0 reference mismatches, 0 DMA mismatches, 59.3 game ticks/s.
+  - **Mixer** (`src/xc_soc/xc_mix.c`, needs a rebuilt image): mixes the sound effects and the already decoded music while a packet is being decoded (the slot for that packet is left out), and sends the next packet as soon as a result arrives instead of at the next tick. The BRR rings now stay full in every run above; an MCU pause only reaches the music once the decoded PCM (up to 100 ms) is used up. With a 6 ms service time the output is identical to the old mixer (correlation 1.0000 at zero lag). RTL run (900 frames, 15 ms): 0 reference mismatches, 0 DMA mismatches, 59.3 game ticks/s.
   - **MCU:** no `sram_reliable()` per loop iteration, decode service inside the CRC and the save, `-O2` for the hot CELT files (above).
   - The model's decode time comes from an instruction-level estimate. The real STM32 cost (flash wait states, ART cache misses) is not known; `xcaudio.txt` reports it.
 
@@ -190,7 +190,7 @@ All runs: 0 reference mismatches, 0 DMA mismatches. With the normal bus latencie
 1. **FPGA:** `verilog/sd2snes_xc` is a Quartus project (`sd2snes_xc.qpf`, EP4CE15F17C8) like the other mk3 cores. `make` in that folder produces `fpga_xc.bi3`; copy it to `/sd2snes/` on the SD card.
 2. **MCU:** build the Opus library (`src/xc_opus/build.sh <opus-1.3.1>`), then the firmware as usual (`make CONFIG=config-mk3-stm32`).
    The MSU-1 core, `fpga_xc_msu.bi3`, is built the same way in `verilog/sd2snes_xc_msu`; copy it next to `fpga_xc.bi3`.
-3. **Soft CPU files:** in `socfw/`, run `build.sh`. Copy `xc_soc.bin` (replacement bootrom + firmware additions, 33,280 bytes) to `/sd2snes/`, next to `fpga_xc.bi3`. Like the bitstream, it belongs to the firmware release, not to the game.
+3. **Soft CPU files:** `xc_soc.bin` (replacement bootrom + firmware additions, 33,280 bytes) is built with the mk3 firmware from `src/xc_soc/` and ends up next to `firmware.stm`/`firmware.im3` (`src/obj-mk3*/`, and in the release). Copy it to `/sd2snes/` together with the firmware: the two belong together, and an older `xc_soc.bin` with a newer firmware or core can fail silently (for example no sound with the MSU-1 core). MesenCE builds its copy from the same sources (`src/xc_soc/build.sh <sd2snes>/src/xc_soc`). Like the bitstream, it belongs to the firmware release, not to the game.
 4. **The game:** put the RP2040 flash dump in `/sd2snes/xenocrisis_rp2040.bin` (16 MB, supplied by the user like the DSP or BS-X files) and load the cartridge's SNES ROM from the menu like any other game (`XENOCRISIS`, 128 KB, CRC32 `FE5B38F0`). The firmware builds the image in the PSRAM (`src/xc_load.c`). Without a `.srm` the save area starts from the dump's, so the cartridge's saves carry over; from then on the saves go to the `.srm` as usual.
    - A missing or wrong `xenocrisis_rp2040.bin` or `xc_soc.bin` is reported by the menu as a missing supplemental file (as for DSP firmware). The dump is checked for size (16 MB) and firmware build (`multicore_launch_core1` at `0x10059060`); `xc_soc.bin` for its header.
    - `xc_build_image.py` still works: a file larger than 128 KB is taken as a prebuilt image and loaded as is.

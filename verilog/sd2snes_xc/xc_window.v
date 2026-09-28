@@ -11,7 +11,7 @@
 // The SoC cleans the D-cache for the descriptor's range before it writes TX_LEN (xc_soc.v), so the
 // DMA sees what the core wrote.
 //
-// Registers (word offsets in the 4 KB block at 0x50803000, see socfw/xc_soc.h):
+// Registers (word offsets in the 4 KB block at 0x50803000, see src/xc_soc/xc_soc.h):
 //   0x00 TX_ADDR    W  RP2040 address of the next descriptor (must be in RAM 0x20000000-0x20041FFF)
 //   0x04 TX_LEN     W  length; posts {TX_ADDR, length} (0 is ignored)
 //   0x08 TX_PENDING R  bytes posted and not yet read by the SNES (ring + queued descriptors)

@@ -283,10 +283,18 @@ ALL_ASFLAGS = -I. -x assembler-with-cpp $(ASFLAGS) $(CDEFS)
 # Default target.
 all: build
 
-build: elf bin hex
+build: elf bin hex xc_soc
 	$(E) "  SIZE   $(TARGET).elf"
 	$(Q)$(ELFSIZE)|grep -v debug
 	cp $(TARGET).bin $(OBJDIR)/$(CONFIG_FW_FILE)
+
+# Xeno Crisis (mk3): the soft CPU support file, built with the firmware so that the two always match; it goes
+# to /sd2snes/ next to the firmware (the top-level Makefile puts it in the release). See xc_soc/Makefile.
+xc_soc:
+ifeq ($(CONFIG_MK3),y)
+	$(Q)$(MAKE) -s -C xc_soc OUT=$(CURDIR)/$(OBJDIR)
+endif
+.PHONY: xc_soc
 
 elf: $(TARGET).elf
 bin: $(TARGET).bin
@@ -418,6 +426,7 @@ clean_list :
 	$(Q)$(REMOVE) $(OBJDIR)/version.h
 	$(Q)$(REMOVE) $(OBJDIR)/${CONFIG_FW_FILE}
 	$(Q)$(REMOVE) $(OBJDIR)/fw.hdr
+	$(Q)$(REMOVE) -r $(OBJDIR)/xc_soc_build $(OBJDIR)/xc_soc.bin $(OBJDIR)/xc_fw.bin $(OBJDIR)/xc_bootrom.bin
 	$(Q)$(REMOVE) $(OBJDIR)/.DS_Store
 	$(Q)$(REMOVE) $(LST)
 	$(Q)$(REMOVE) $(CSRC:.c=.s)

@@ -171,7 +171,7 @@ static int format_stats(char* b, int size)
 	int n;
 #ifdef XC_MSU_DIAG
 	if(romprops.has_msu1) {
-		/* the mixer's counters and state (socfw/xc_mix.c "dbg", "st"): RAM 0x20040000 = SRAM chip 0x48000
+		/* the mixer's counters and state (src/xc_soc/xc_mix.c "dbg", "st"): RAM 0x20040000 = SRAM chip 0x48000
 		   (the soft CPU's D-cache is write-back, so they may lag a little) */
 		uint32_t m[25];
 		sram_readblock(m, SRAM_SAVE_ADDR + 0x48000, sizeof(m));
