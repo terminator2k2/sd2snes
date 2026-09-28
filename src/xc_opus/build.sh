@@ -7,8 +7,10 @@
 #   - CELT: the portable C macros, with m4_exact.patch (M4_EXACT: 64-bit MULT16_32_Q16/P16/Q15, which give the
 #     same results as the 16x16 split). Do NOT enable the CELT ARMv5E macros: their MULT16_32_Q15 drops a bit.
 #   - SILK: the ARMv5E inline-assembly macros (exact).
-# MCU time for the game's music (instruction-level Cortex-M4 model, before flash wait states): about 33 M cycles/s
-# (39% of 84 MHz) as built here (-Os, small-footprint cwrs.c); -O2 with the table would be 26 M but does not fit.
+# MCU time for the game's music (instruction-level Cortex-M4 model, before flash wait states): about 30 M cycles/s
+# (36% of 84 MHz) as built here: -Os, except the hot CELT synthesis files at -O2 (FFT, MDCT, comb filter,
+# deemphasis: -10% time for +1.8 KB), small-footprint cwrs.c. All -O2 with the PVQ table would be 26 M but does
+# not fit.
 set -e
 S=$(cd "$1" && pwd)
 D=$(cd "$(dirname "$0")" && pwd)
@@ -21,7 +23,9 @@ AR=${AR:-arm-none-eabi-ar}
 # -Os by default: the firmware with the embedded mini bitstream (fpga_mini.bi3, 56,939 bytes) does not fit the
 # 212,480-byte application flash with -O2 (about 20 KB over).
 OPT=${OPT:--Os}
-CF="-mthumb -mcpu=cortex-m4 -mfloat-abi=hard $OPT -ffunction-sections -fdata-sections -Wall -Wno-unused
+OPT_HOT=${OPT_HOT:--O2}
+HOT="kiss_fft mdct celt celt_decoder"
+CF="-mthumb -mcpu=cortex-m4 -mfloat-abi=hard -ffunction-sections -fdata-sections -Wall -Wno-unused
     -DOPUS_BUILD -DFIXED_POINT -DDISABLE_FLOAT_API -DVAR_ARRAYS -DHAVE_LRINT -DHAVE_LRINTF -DM4_EXACT
     -I$B -I$B/include -I$B/celt -I$B/silk -I$B/silk/fixed"
 # cwrs.c only: compute the PVQ codeword counts instead of the 5 KB CELT_PVQ_U_DATA table (exact integer code;
@@ -37,9 +41,13 @@ SILK_SRC="CNG LPC_analysis_filter LPC_fit LPC_inv_pred_gain NLSF2A NLSF_decode N
     tables_gain tables_other tables_pitch_lag tables_pulses_per_block"
 SRC_SRC="opus opus_decoder"
 objs=""
-for f in $CELT_SRC; do x=""; [ $f = cwrs ] && x="$CWRS"; $CC $CF $x -c $B/celt/$f.c -o $B/celt_$f.o; objs="$objs $B/celt_$f.o"; done
-for f in $SILK_SRC; do $CC $CF $SILK -c $B/silk/$f.c -o $B/silk_$f.o; objs="$objs $B/silk_$f.o"; done
-for f in $SRC_SRC; do $CC $CF -c $B/src/$f.c -o $B/src_$f.o; objs="$objs $B/src_$f.o"; done
+for f in $CELT_SRC; do
+  x=""; [ $f = cwrs ] && x="$CWRS"
+  o=$OPT; case " $HOT " in *" $f "*) o=$OPT_HOT;; esac
+  $CC $CF $o $x -c $B/celt/$f.c -o $B/celt_$f.o; objs="$objs $B/celt_$f.o"
+done
+for f in $SILK_SRC; do $CC $CF $OPT $SILK -c $B/silk/$f.c -o $B/silk_$f.o; objs="$objs $B/silk_$f.o"; done
+for f in $SRC_SRC; do $CC $CF $OPT -c $B/src/$f.c -o $B/src_$f.o; objs="$objs $B/src_$f.o"; done
 rm -f "$D"/libopus_xc.a
 $AR rcs "$D"/libopus_xc.a $objs
 rm -rf "$D"/include && cp -r "$B"/include "$D"/include

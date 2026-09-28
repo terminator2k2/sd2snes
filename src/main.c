@@ -537,8 +537,14 @@ int main(void) {
       if (usb_cmd == SNES_CMD_GAMELOOP) usb_cmd = 0;
 
 //        sleep_ms(250);
-      WD_SITE(WD_SITE_SRAM_REL);
-      sram_reliable();
+WD_SITE(WD_SITE_SRAM_REL);
+
+#ifdef CONFIG_MK3
+      /* Xeno Crisis: avoid repeated PSRAM reads that delay audio decoding.
+         The SRAM check is still performed periodically in snes_main_loop(). */
+      if (!romprops.has_xc)
+#endif
+        sram_reliable();
       /* NES in-game debug snapshot ("NDBG" @ PSRAM 0x400100): PC/regs do
          6502 + contadores da bridge, lidos da config-bus (grupo 0x04) e
          publicados 1x/iteracao.  No-op sem .nes; bounded (ver nes.c). */
@@ -558,6 +564,10 @@ int main(void) {
       uint8_t resetState = get_snes_reset_state();
       if(resetState == SNES_RESET_LONG) {
         STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
+
+#ifdef CONFIG_MK3
+        if (romprops.has_xc) xc_audio_report();
+#endif
         prepare_reset();
         break;
       } else {
@@ -596,6 +606,10 @@ int main(void) {
               case SNES_CMD_RESET_TO_MENU:
                 usb_cmd = 0;
                 STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
+
+#ifdef CONFIG_MK3
+                if (romprops.has_xc) xc_audio_report();
+#endif
                 prepare_reset();
                 goto snes_loop_out;
               case SNES_CMD_COMBO_TRANSITION:

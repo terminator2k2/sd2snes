@@ -110,10 +110,12 @@ The SoC is held in reset while the SNES is in reset (`SNES_DEADr`, like the cart
   - the `.srm` loads to the SRAM chip, which is filled with `0xFF` (erased flash) when there is no `.srm`;
   - no cheats or save states;
   - `xc_run(1)` releases the soft CPU just before the SNES leaves reset.
-- **Main loop** (`main.c`): `xc_audio_poll()` provides the Opus decode service (`xc_audio.c`) and a halt report on the UART.
+- **Main loop** (`main.c`): `xc_audio_poll()` provides the Opus decode service (`xc_audio.c`) and a halt report on the UART. With Xeno Crisis the loop skips its per-iteration `sram_reliable()` (256 PSRAM reads, 1–2 ms, which also take ROM-bus slots from the soft CPU); `snes_main_loop()` still runs it every 250 ms.
+- **Long MCU jobs serve the decoder in between** (`memory.c`): the save RAM CRC (32 KB every 250 ms, about 20 ms) calls `xc_audio_service()` every 512 bytes, and `save_sram()` after every 512-byte sector written to the SD card.
+- **Timing statistics** (`xc_audio.c`, DWT cycle counter): per packet the service time (including the poll gap before it) and the decode time, the poll gaps, and how often the mixer was already waiting for the next packet. Printed on the UART every 1,000 packets and written to **`/sd2snes/xcaudio.txt`** when the game is left (long reset or in-game reset to menu).
 - **Opus library:** `xc_opus/build.sh <opus-1.3.1 source>` builds `libopus_xc.a`. The settings are exact (see the script). **Built with the sd2snes MCU flags and run on a Cortex-M4 instruction-level model, it decodes all 480,000 samples bit-exact** (checksum `0xdb88f8e0`, the same as the host decoder that matches the firmware).
 - **Size, with the real mini bitstream** (`fpga_mini.bi3`, 56,939 bytes, embedded by the build):
-  - **`firmware.stm` is 208,300 bytes: a 207,788-byte image plus the 512-byte header, against 212,480 + 512.** That leaves 4,692 bytes free.
+  - **`firmware.stm` is 211,388 bytes (with the stutter changes: hot Opus files at `-O2`, statistics): a 210,876-byte image plus the 512-byte header, against 212,480 + 512.** That leaves 1,604 bytes free (it was 4,692 before those changes). RAM: 13.4 KB left for the stack (Opus needs about 11 KB).
   - Two changes were needed to fit:
     - **`stm32f401.ld`:** the `.ahbram` buffers (8 KB sort buffer, MSU-1) became `NOLOAD`. On the STM32 nothing initializes them from flash, but their 8,992 zero bytes were stored in the image. The RAM layout is unchanged. Stock 1.11.2 shrinks by the same 8,992 bytes (153,936 → 144,944).
     - **`xc_opus/build.sh`:** `-Os`, and `SMALL_FOOTPRINT` for `cwrs.c` only (computes the PVQ codeword counts instead of a 5 KB table). Still bit-exact: checksum `0xdb88f8e0` on the host and on the Cortex-M4 model.
@@ -123,7 +125,21 @@ The SoC is held in reset while the SNES is in reset (`SNES_DEADr`, like the cart
     - `spi_rx_block` takes a DMA path for lengths that are a multiple of 4 on an aligned buffer. That path uses peripheral flow control, which SPI doesn't support, so its transfer-complete wait never ends and the **MCU hangs**. On hardware this happened within the first few packets (a quarter of the game's packets qualify; the first is packet #4). The mixer then waited for its decode result forever, so there was no music and no sound effects, while the game itself kept running.
     - Both run bytes back to back. `spi.v` loads the next read value and latches a written byte a few CLK2 cycles after each byte, so back-to-back bytes arrive corrupted.
   - Now every byte goes through `FPGA_RX_BYTE()`, or `FPGA_TX_BYTE()` + `FPGA_TX_SYNC()`, the way the stock firmware talks to the FPGA.
-- **MCU time for the Opus decoder:** about 33 M cycles/s (39% of 84 MHz, instruction-level Cortex-M4 model, before flash wait states). That is +27% over `-O2` with the table (26.0 M); −Os accounts for 18% and the computed `cwrs` for 8%.
+- **MCU time for the Opus decoder:** about 29.8 M cycles/s (36% of 84 MHz, instruction-level Cortex-M4 model, before flash wait states), i.e. about 7.1 ms per 20 ms packet. The hot CELT synthesis files (`kiss_fft`, `mdct`, `celt`, `celt_decoder`: FFT, MDCT, comb filter, deemphasis) are built `-O2`, the rest `-Os`: −10% time for +1.8 KB (it was 33.1 M, 39%, all `-Os`). All `-O2` with the PVQ table would be 26.0 M; the computed `cwrs` costs 8% but saves the 5 KB the flash does not have.
+- **Audio stutter (second hardware run) and the throughput rule.** The mixer submits one packet at a time. A packet is 20 ms of music, so the whole service per packet (poll latency, SPI transfer, decode) must average below 20 ms, or the music runs dry. Measured in MesenCE with a fixed service time per packet (`XC_DEC_LATENCY_US`, 30 s of play, SoC mode):
+
+  | Service time per packet | Old mixer: music underruns | New mixer: music underruns |
+  |---|---|---|
+  | 6–18 ms | 0 | 0 |
+  | 19 ms | 80 | 0 |
+  | 20 ms | 1,832 | 0 |
+  | 25 ms | — | 7,608 |
+  | 15–18 ms + 20–40 ms MCU pause every 250 ms | 0 | 0 |
+
+  The old mixer also stopped mixing entirely while a decode was out, so the BRR rings (about 128 ms) drained during long MCU pauses and the sound effects stuttered with the music. Changes:
+  - **Mixer** (`socfw/xc_mix.c`, needs a rebuilt image): mixes the sound effects and the already decoded music while a packet is being decoded (the slot for that packet is left out), and sends the next packet as soon as a result arrives instead of at the next tick. The BRR rings now stay full in every run above; an MCU pause only reaches the music once the decoded PCM (up to 100 ms) is used up. With a 6 ms service time the output is identical to the old mixer (correlation 1.0000 at zero lag). RTL run (900 frames, 15 ms): 0 reference mismatches, 0 DMA mismatches, 59.3 game ticks/s.
+  - **MCU:** no `sram_reliable()` per loop iteration, decode service inside the CRC and the save, `-O2` for the hot CELT files (above).
+  - The model's decode time comes from an instruction-level estimate. The real STM32 cost (flash wait states, ART cache misses) is not known; `xcaudio.txt` reports it.
 
 FPGA commands (`mcu_cmd.v`):
 
@@ -166,7 +182,7 @@ Leaving these out saves about 2,600 LEs and 20 M9K blocks. The first two can be 
 | **MCU ↔ FPGA link, LPC1756 build** (`mcutest/`, `XC_NODEC=1`, `xc_audio.c` without `CONFIG_MK3_STM32`) | Same harness | 500/500 jobs answered (ret 0, range 0), no hang, no Opus code linked |
 | **MCU ↔ FPGA link, end to end** (`mcutest/`) | The real `src/xc_audio.c`, compiled for the host, with the FPGA SPI macros mapped to an STM32F401 SPI master model (42 MHz, mode 0; the timing of the stock `spi_tx_byte`/`spi_rx_byte`/`spi_rx_block`) against the real `spi.v`, `mcu_cmd.v` and `xc_decbox.v`. The soft-core side of the mailbox feeds the game's 500 Opus packets as the mixer does; ret, final range and PCM are compared with a direct decode. | **Found the bug behind "no music, no sound effects" on hardware (below): the original code hangs at packet #4.** Fixed code: 500/500 packets, 0 mismatches, PCM checksum `0xdb88f8e0`. It still works with a 1-cycle gap before each read byte (`spi_rx_byte` has several); it fails with no gap. SPI time: about 0.5 ms per packet (2.4% of the MCU). |
 | Image builder | The RTL runs from the file `xc_build_image.py` produced (`XC_RTL_IMAGE`) | Same results and screenshots as the RTL's own layout |
-| MCU firmware | `make CONFIG=config-mk3-stm32` with the changes, the Opus library (`-Os`, small-footprint `cwrs.c`) and the real `fpga_mini.bi3` (56,939 bytes) | **Builds and links: `firmware.stm` 208,300 bytes (limit 212,992 with header).** The embedded bitstream is byte-identical to the file. With `-O2` Opus the link stops with "firmware image does not fit in flash". Opus decoder output: checksum `0xdb88f8e0`, as before (host and Cortex-M4 model). |
+| MCU firmware | `make CONFIG=config-mk3-stm32` with the changes, the Opus library (`-Os`, hot CELT files `-O2`, small-footprint `cwrs.c`) and the real `fpga_mini.bi3` (56,939 bytes) | **Builds and links: `firmware.stm` 211,388 bytes (limit 212,992 with header).** The embedded bitstream is byte-identical to the file. With `-O2` Opus the link stops with "firmware image does not fit in flash". Opus decoder output: checksum `0xdb88f8e0`, as before (host and Cortex-M4 model). |
 | Core elaboration | iverilog, `-DMK3`, the whole `sd2snes_xc` (Altera IP replaced by behavioural models) | Clean |
 
 The "reads found the ring empty" statistic was 68 in 60 s. Each one is a SNES read that came within about 250 ns of a post, before the first byte arrived. The kernel is polling at those moments, as it does on the cartridge, where the RP2040's DMA also takes time.

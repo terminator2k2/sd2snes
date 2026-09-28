@@ -2282,6 +2282,16 @@ int save_sram(uint8_t* filename, uint32_t sram_size, uint32_t base_addr) {
       return 0;
     }
     remain -= copy;
+#ifdef CONFIG_MK3
+    /* Xeno Crisis: saving takes a while (SD card); serve the Opus decode service after every sector */
+    if(romprops.has_xc && remain) {
+      FPGA_DESELECT();
+      xc_audio_service();
+      set_mcu_addr(base_addr + sram_size - remain);
+      FPGA_SELECT();
+      FPGA_TX_BYTE(0x88); /* read */
+    }
+#endif
   }
   FPGA_DESELECT();
   file_close();
@@ -2295,9 +2305,21 @@ uint32_t calc_sram_crc(uint32_t base_addr, uint32_t size, uint32_t crc) {
   set_mcu_addr(base_addr);
   FPGA_SELECT();
   FPGA_TX_BYTE(FPGA_CMD_READMEM | FPGA_MEM_AUTOINC);
+
   for(count=0; count<size; count++) {
+#ifdef CONFIG_MK3
+    /* Xeno Crisis: service audio periodically during SRAM CRC. */
+    if (romprops.has_xc && count && !(count & 511)) {
+      FPGA_DESELECT();
+      xc_audio_service();
+      set_mcu_addr(base_addr + count);
+      FPGA_SELECT();
+      FPGA_TX_BYTE(FPGA_CMD_READMEM | FPGA_MEM_AUTOINC);
+    }
+#endif
     FPGA_WAIT_RDY_INLINE();
     data = FPGA_RX_BYTE();
+
     if(get_snes_reset()) {
       crc_valid = 0;
       sram_crc_valid = romprops.has_combo ? 1 : 0;

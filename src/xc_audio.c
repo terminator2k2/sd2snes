@@ -13,9 +13,16 @@
  * MULT16_32_Q16/P16/Q15, which are identical to the 16x16 split). Do NOT enable the CELT ARMv5E macros:
  * their MULT16_32_Q15 drops a bit and changes the output. See m4bench/ for the check.
  *
- * Timing: about 385k instructions / 520k cycles per packet on a Cortex-M4 (instruction-count model),
- * i.e. about 6 ms at 84 MHz; the mixer keeps up to 6 packets (120 ms) of decoded music, so a poll every
- * few ms is plenty. The decoder is never reset between tracks (the firmware doesn't either).
+ * Timing: about 600k cycles per packet on a Cortex-M4 (instruction-count model, before flash wait states;
+ * hot CELT files at -O2), i.e. about 7 ms at 84 MHz, for one packet every 20 ms. The mixer keeps up to
+ * 6 packets (120 ms) of decoded music and sends the next packet as soon as one is decoded, so the whole
+ * service (poll latency + transfer + decode) must stay below 20 ms per packet on average. The main loop
+ * therefore calls xc_audio_poll() often, and long MCU jobs (the SRAM CRC) call xc_audio_service() in between.
+ * The decoder is never reset between tracks (the firmware doesn't either).
+ *
+ * Statistics (DWT cycle counter): service time per packet, decode time, poll gaps, and how often the mixer
+ * was already waiting for the next packet. Printed on the UART every 1000 packets and written to
+ * /sd2snes/xcaudio.txt when the game is left (xc_audio_report()).
  */
 #include <string.h>
 #include "config.h"
@@ -25,6 +32,19 @@
 #include "opus.h"
 #endif
 #include "uart.h"
+#ifndef XC_HOST_TEST
+#include "ff.h"
+#endif
+
+/* cycle counter: the Cortex-M3/M4 DWT (enabled in xc_audio_init) */
+#ifndef XC_CYCLES
+#define XC_DEMCR       (*(volatile uint32_t*)0xE000EDFCu)
+#define XC_DWT_CTRL    (*(volatile uint32_t*)0xE0001000u)
+#define XC_CYCLES()    (*(volatile uint32_t*)0xE0001004u)
+#define XC_CYCLES_ON() do { XC_DEMCR |= 1u << 24; XC_DWT_CTRL |= 1u; } while(0)
+#endif
+#define XC_CYC_PER_US  (CONFIG_CPU_FREQUENCY / 1000000)
+#define XC_HIST        48              /* 1 ms buckets; the last one is "47 ms or more" */
 
 #ifdef CONFIG_MK3_STM32
 /* opus_decoder_get_size(2) is 26,496 bytes for this build; keep a margin */
@@ -36,6 +56,19 @@ static int decoder_ok;
 uint32_t xc_audio_packets, xc_audio_errors;
 static uint32_t status_polls;
 static uint8_t halt_reported;
+static uint8_t active;
+
+static struct {
+	uint32_t last_poll;          /* cycle count at the last poll */
+	uint32_t last_done;          /* cycle count at the end of the last job */
+	uint8_t first_poll_after_job;
+	uint32_t jobs, waiting;      /* jobs; jobs already waiting at the first poll after the previous one */
+	uint64_t svc_sum, dec_sum;   /* cycles: whole service (read packet .. done), decode alone */
+	uint32_t svc_max, dec_max, gap_max;
+	uint32_t gaps_over_5ms, gaps_over_20ms;
+	uint32_t svc_hist[XC_HIST];  /* per-job service time + the poll gap before it (ms) */
+	uint32_t gap_hist[XC_HIST];  /* poll gaps (ms), all polls */
+} xs IN_AHBRAM;                  /* AHB RAM on the LPC1756, whose main RAM is short (cleared in xc_audio_init) */
 
 /* SPI to the FPGA, one byte at a time, the way the stock firmware talks to it.
  *  - spi_rx_block()/spi_tx_block() (FPGA_RX_BLOCK/FPGA_TX_BLOCK) are never used with the FPGA elsewhere and are
@@ -77,6 +110,89 @@ void xc_audio_init(void)
 	xc_audio_errors = 0;
 	status_polls = 0;
 	halt_reported = 0;
+	memset(&xs, 0, sizeof(xs));
+#ifdef XC_CYCLES_ON
+	XC_CYCLES_ON();
+#endif
+	xs.last_poll = XC_CYCLES();
+	active = 1;
+}
+
+static void hist_add(uint32_t* h, uint32_t cycles)
+{
+	uint32_t ms = cycles / (XC_CYC_PER_US * 1000u);
+	h[ms < XC_HIST ? ms : XC_HIST - 1]++;
+}
+
+static uint32_t cyc_us(uint64_t c) { return (uint32_t)(c / XC_CYC_PER_US); }
+
+/* p-th percentile (per mille) of a 1 ms histogram, in ms (upper bucket edge) */
+static uint32_t hist_pct(const uint32_t* h, uint32_t permille)
+{
+	uint32_t n = 0, acc = 0;
+	for(int i = 0; i < XC_HIST; i++) n += h[i];
+	if(!n) return 0;
+	for(int i = 0; i < XC_HIST; i++) {
+		acc += h[i];
+		if((uint64_t)acc * 1000u >= (uint64_t)n * permille) return i + 1;
+	}
+	return XC_HIST;
+}
+
+static int format_stats(char* b, int size)
+{
+	uint32_t j = xs.jobs ? xs.jobs : 1;
+	int n = snprintf(b, size,
+		"Xeno Crisis audio (MCU decode service): %lu packets, %lu errors, mixer already waiting for %lu\r\n"
+		"  service per packet (us): avg %lu, max %lu; p50 %lu ms, p99 %lu ms, p99.9 %lu ms (with the poll gap before)\r\n"
+		"  decode alone (us): avg %lu, max %lu\r\n"
+		"  poll gaps: max %lu us, over 5 ms %lu, over 20 ms %lu; p99.9 %lu ms\r\n",
+		(unsigned long)xs.jobs, (unsigned long)xc_audio_errors, (unsigned long)xs.waiting,
+		(unsigned long)cyc_us(xs.svc_sum / j), (unsigned long)cyc_us(xs.svc_max),
+		(unsigned long)hist_pct(xs.svc_hist, 500), (unsigned long)hist_pct(xs.svc_hist, 990),
+		(unsigned long)hist_pct(xs.svc_hist, 999),
+		(unsigned long)cyc_us(xs.dec_sum / j), (unsigned long)cyc_us(xs.dec_max),
+		(unsigned long)cyc_us(xs.gap_max), (unsigned long)xs.gaps_over_5ms, (unsigned long)xs.gaps_over_20ms,
+		(unsigned long)hist_pct(xs.gap_hist, 999));
+	if(n < 0 || n >= size) return size - 1;
+	for(int k = 0; k < 2; k++) {
+		const uint32_t* h = k ? xs.gap_hist : xs.svc_hist;
+		int m = snprintf(b + n, size - n, "  %s ms histogram:", k ? "poll gap" : "service");
+		if(m < 0 || m >= size - n) return size - 1;
+		n += m;
+		for(int i = 0; i < XC_HIST; i++) {
+			if(!h[i]) continue;
+			m = snprintf(b + n, size - n, " %d:%lu", i, (unsigned long)h[i]);
+			if(m < 0 || m >= size - n) return size - 1;
+			n += m;
+		}
+		m = snprintf(b + n, size - n, "\r\n");
+		if(m < 0 || m >= size - n) return size - 1;
+		n += m;
+	}
+	return n;
+}
+
+/* when the game is left: statistics to the UART and to /sd2snes/xcaudio.txt */
+static char stats_buf[1024] IN_AHBRAM;
+
+void xc_audio_report(void)
+{
+	char* buf = stats_buf;
+	if(!active) return;
+	active = 0;
+	int n = format_stats(buf, sizeof(stats_buf));
+	printf("%s", buf);
+#ifndef XC_HOST_TEST
+	FIL f;
+	UINT bw;
+	if(f_open(&f, "/sd2snes/xcaudio.txt", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
+		f_write(&f, buf, n, &bw);
+		f_close(&f);
+	}
+#else
+	(void)n;
+#endif
 }
 
 static uint8_t read_status(uint16_t* len)
@@ -124,6 +240,13 @@ static void send_done(int32_t ret, uint32_t range)
 void xc_audio_poll(void)
 {
 	uint16_t len;
+	uint32_t now = XC_CYCLES();
+	uint32_t gap = now - xs.last_poll;
+	xs.last_poll = now;
+	if(gap > xs.gap_max) xs.gap_max = gap;
+	if(gap > 5000u * XC_CYC_PER_US) xs.gaps_over_5ms++;
+	if(gap > 20000u * XC_CYC_PER_US) xs.gaps_over_20ms++;
+	hist_add(xs.gap_hist, gap);
 	if(++status_polls >= 100000) {
 		status_polls = 0;
 		check_soc();
@@ -139,15 +262,20 @@ void xc_audio_poll(void)
 		FPGA_DESELECT();
 		return; /* pick up a job on the next poll, after the reset is acknowledged */
 	}
+	uint8_t first = xs.first_poll_after_job;
+	xs.first_poll_after_job = 0;
 	if(!(st & XCA_ST_JOB)) {
 		return;
 	}
+	if(first) xs.waiting++;
+	uint32_t t0 = now - gap;     /* the job may have been waiting since the previous poll (or the previous job) */
 
 #ifndef CONFIG_MK3_STM32
 	/* LPC1756: no decoder. "Nothing decoded": the mixer ends the track and keeps mixing the sound effects. */
 	(void)len;
 	xc_audio_packets++;
 	send_done(0, 0);
+	uint32_t td = 0;
 #else
 	if(len > sizeof(packet)) {
 		len = sizeof(packet);
@@ -160,12 +288,14 @@ void xc_audio_poll(void)
 
 	int32_t ret;
 	uint32_t range = 0;
+	uint32_t td = XC_CYCLES();
 	if(decoder_ok) {
 		ret = opus_decode((OpusDecoder*)decoder_mem, packet, len, pcm, 480, 0);
 		opus_decoder_ctl((OpusDecoder*)decoder_mem, OPUS_GET_FINAL_RANGE(&range));
 	} else {
 		ret = OPUS_INTERNAL_ERROR;
 	}
+	td = XC_CYCLES() - td;
 	if(ret < 0) {
 		xc_audio_errors++;
 		memset(pcm, 0, sizeof(pcm));
@@ -182,4 +312,26 @@ void xc_audio_poll(void)
 
 	send_done(ret, range);
 #endif
+	uint32_t end = XC_CYCLES();
+	uint32_t svc = end - t0;
+	xs.jobs++;
+	xs.svc_sum += svc;
+	xs.dec_sum += td;
+	if(svc > xs.svc_max) xs.svc_max = svc;
+	if(td > xs.dec_max) xs.dec_max = td;
+	hist_add(xs.svc_hist, svc);
+	xs.last_done = end;
+	xs.last_poll = end;          /* the service time is not a poll gap */
+	xs.first_poll_after_job = 1;
+	if(xs.jobs % 1000 == 0) {
+		format_stats(stats_buf, sizeof(stats_buf));
+		printf("%s", stats_buf);
+		xs.last_poll = XC_CYCLES();
+	}
+}
+
+/* for long MCU jobs (SRAM CRC): serve a waiting job; the caller has deselected the FPGA */
+void xc_audio_service(void)
+{
+	if(active) xc_audio_poll();
 }

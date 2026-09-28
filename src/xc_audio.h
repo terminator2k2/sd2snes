@@ -20,6 +20,8 @@
 void xc_run(uint8_t run);   /* release (1) / hold (0) the soft CPU; release once the image and the save are loaded */
 void xc_audio_init(void);   /* call when a Xeno Crisis cartridge is started */
 void xc_audio_poll(void);   /* call from the main loop while the game runs; returns quickly when idle */
+void xc_audio_service(void);/* same, from inside long MCU jobs (FPGA deselected); does nothing when no game runs */
+void xc_audio_report(void); /* when the game is left: timing statistics to the UART and /sd2snes/xcaudio.txt */
 extern uint32_t xc_audio_packets, xc_audio_errors;
 
 #endif
