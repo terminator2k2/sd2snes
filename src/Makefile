@@ -293,7 +293,7 @@ build: elf bin hex xc_soc
 # to /sd2snes/ next to the firmware (the top-level Makefile puts it in the release). See xc_soc/Makefile.
 xc_soc:
 ifeq ($(CONFIG_MK3),y)
-	$(Q)$(MAKE) -s -C xc_soc OUT=$(CURDIR)/$(OBJDIR)
+	$(Q)$(MAKE) -s -C xc_soc OUT=../$(OBJDIR)
 endif
 .PHONY: xc_soc
 
