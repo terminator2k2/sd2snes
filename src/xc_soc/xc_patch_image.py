@@ -3,9 +3,10 @@
   - the firmware additions (xc_fw.bin from `make` here or MesenCE socfw/build.sh: mixer + function replacements) go to 0x10F00000;
   - every function listed in the blob's patch table is redirected (see xc_fw_header.c).
 With --split-only, only multicore_launch_core1() is patched (MesenCE Split mode).
+With --mk2, the mk2 table is applied as well (sd2snes mk2 core: software division instead of the SIO divider).
 The replacement bootrom (xc_bootrom.bin) is separate: it goes to the SoC's boot ROM at 0x00000000.
 
-    xc_patch_image.py [--split-only] xenocrisis_rp2040.bin xc_fw.bin patched.bin
+    xc_patch_image.py [--split-only | --mk2] xenocrisis_rp2040.bin xc_fw.bin patched.bin
 """
 import struct, sys
 
@@ -14,7 +15,7 @@ BLOB_ADDR = 0x10F00000
 LAUNCH_CORE1 = 0x10059060
 
 
-def patch(img, blob, split_only=False):
+def patch(img, blob, split_only=False, mk2=False):
     """Apply the firmware additions to a 16 MB flash image (bytearray) in place; returns the number of patches."""
     if len(img) != 0x1000000:
         raise ValueError('expected a 16 MB flash dump')
@@ -43,16 +44,28 @@ def patch(img, blob, split_only=False):
         else:            # movs r0, #0; bx lr
             struct.pack_into('<HH', img, p, 0x2000, 0x4770)
         patched += 1
+    t = 16 + count * 12            # mk2 table: "MK2P", count, {address, target, kind 0} per patch
+    if mk2 and not split_only:
+        if len(blob) < t + 8 or struct.unpack_from('<I', blob, t)[0] != 0x50324B4D:
+            raise ValueError('the firmware additions have no mk2 table')
+        for i in range(struct.unpack_from('<I', blob, t + 4)[0]):
+            addr, target, kind = struct.unpack_from('<III', blob, t + 8 + i * 12)
+            lit = (addr + 10 + 3) & ~3
+            k = (lit - ((addr + 6) & ~3)) // 4
+            struct.pack_into('<6H', img, addr - FLASH, 0xB401, 0x4800 | k, 0x4684, 0xBC01, 0x4760, 0xBF00)
+            struct.pack_into('<I', img, lit - FLASH, target)
+            patched += 1
     return version, patched
 
 
 if __name__ == '__main__':
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     split_only = '--split-only' in sys.argv
+    mk2 = '--mk2' in sys.argv
     img = bytearray(open(args[0], 'rb').read())
     blob = open(args[1], 'rb').read()
     try:
-        version, patched = patch(img, blob, split_only)
+        version, patched = patch(img, blob, split_only, mk2)
     except ValueError as e:
         sys.exit(str(e))
     open(args[2], 'wb').write(img)
