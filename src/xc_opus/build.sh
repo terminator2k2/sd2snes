@@ -7,6 +7,8 @@
 #   - CELT: the portable C macros, with m4_exact.patch (M4_EXACT: 64-bit MULT16_32_Q16/P16/Q15, which give the
 #     same results as the 16x16 split). Do NOT enable the CELT ARMv5E macros: their MULT16_32_Q15 drops a bit.
 #   - SILK: the ARMv5E inline-assembly macros (exact).
+#   - SILK: without the downsampling resampler (xc_nodownsample.patch, XC_NO_DOWNSAMPLE): the decoder runs at 24 kHz,
+#     above every SILK internal rate, so it only ever upsamples; saves about 1.3 KB of flash.
 # MCU time for the game's music (instruction-level Cortex-M4 model, before flash wait states): about 30 M cycles/s
 # (36% of 84 MHz) as built here: -Os, except the hot CELT synthesis files at -O2 (FFT, MDCT, comb filter,
 # deemphasis: -10% time for +1.8 KB), small-footprint cwrs.c. All -O2 with the PVQ table would be 26 M but does
@@ -18,6 +20,7 @@ B=$(mktemp -d)
 trap 'rm -rf "$B"' EXIT
 cp -r "$S"/celt "$S"/silk "$S"/src "$S"/include "$B"/
 patch -s -d "$B" -p1 < "$D"/m4_exact.patch
+patch -s -d "$B" -p1 < "$D"/xc_nodownsample.patch
 CC=${CC:-arm-none-eabi-gcc}
 AR=${AR:-arm-none-eabi-ar}
 # -Os by default: the firmware with the embedded mini bitstream (fpga_mini.bi3, 56,939 bytes) does not fit the
@@ -26,7 +29,7 @@ OPT=${OPT:--Os}
 OPT_HOT=${OPT_HOT:--O2}
 HOT="kiss_fft mdct celt celt_decoder"
 CF="-mthumb -mcpu=cortex-m4 -mfloat-abi=hard -ffunction-sections -fdata-sections -Wall -Wno-unused
-    -DOPUS_BUILD -DFIXED_POINT -DDISABLE_FLOAT_API -DVAR_ARRAYS -DHAVE_LRINT -DHAVE_LRINTF -DM4_EXACT
+    -DOPUS_BUILD -DFIXED_POINT -DDISABLE_FLOAT_API -DVAR_ARRAYS -DHAVE_LRINT -DHAVE_LRINTF -DM4_EXACT -DXC_NO_DOWNSAMPLE
     -I$B -I$B/include -I$B/celt -I$B/silk -I$B/silk/fixed"
 # cwrs.c only: compute the PVQ codeword counts instead of the 5 KB CELT_PVQ_U_DATA table (exact integer code;
 # bit-exact, checked with the m4bench checksum). The rest of SMALL_FOOTPRINT is left off.

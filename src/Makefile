@@ -366,7 +366,7 @@ $(OBJDIR)/%.sym: $(OBJDIR)/%.elf
 # Xeno Crisis (STM32): the Opus decoder library and its headers, built before anything is compiled (xc_audio.c
 # includes opus.h) and linked into the firmware
 ifneq ($(XC_OPUS_LIB),)
-$(XC_OPUS_LIB): $(XC_OPUS_DIR)/build.sh $(XC_OPUS_DIR)/m4_exact.patch
+$(XC_OPUS_LIB): $(XC_OPUS_DIR)/build.sh $(XC_OPUS_DIR)/m4_exact.patch $(XC_OPUS_DIR)/xc_nodownsample.patch
 	$(E) "  OPUS   $@"
 	$(Q)bash $(XC_OPUS_DIR)/build.sh $(XC_OPUS_DIR)/opus-1.3.1 >/dev/null
 $(OBJ): | $(XC_OPUS_LIB)
