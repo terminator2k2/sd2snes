@@ -69,11 +69,4 @@ soft CPU implements what the game firmware uses: the Cortex-M0+ subset, includin
   `cc -O2 test_mix_math.c && ./a.out`.
 - `xc_patch_image.py`, `xc_build_image.py`: offline tools that apply the same patches to a flash dump and build
   a complete prebuilt image. The firmware does this itself at load time now, so these are only needed for
-  debugging or for comparing against the MesenCE emulator. A prebuilt image (any Xeno Crisis file larger than
-  128 KB) still loads.
-
-## Reference
-
-The mixer and the replacement functions follow MesenCE's high-level emulation of the cartridge (`XcAudio.cpp`,
-`Rp2040.cpp`), whose audio is bit-exact with the real firmware. Runs on MesenCE and on sd2snes can therefore be
-compared directly.
+  debugging or for comparing against an emulator (for example MesenCE).
