@@ -99,7 +99,8 @@ SRC += spc7110rtc.c
 SRC += sufami.c
 
 # Xeno Crisis (sd2snes_xc core): decode service for the soft CPU, both mk3 MCUs.
-# STM32F401 (firmware.stm): with the Opus decoder; build the library first: xc_opus/build.sh <opus-1.3.1 source dir>
+# STM32F401 (firmware.stm): with the Opus decoder, built automatically from the Opus 1.3.1 source in
+# xc_opus/opus-1.3.1 (xc_opus/build.sh; needs bash and patch)
 # LPC1756 (firmware.im3): no Opus (the decoder needs ~26.5 KB of contiguous RAM plus ~11 KB of stack; the LPC1756
 # has 16 KB + 16 KB, mostly used): music packets are answered as "not decoded", sound effects play normally.
 ifeq ($(CONFIG_MK3),y)
@@ -362,10 +363,19 @@ $(OBJDIR)/%.sym: $(OBJDIR)/%.elf
 	$(E) "  SYM    $<"
 	$(E)$(NM) -n $< > $@
 
+# Xeno Crisis (STM32): the Opus decoder library and its headers, built before anything is compiled (xc_audio.c
+# includes opus.h) and linked into the firmware
+ifneq ($(XC_OPUS_LIB),)
+$(XC_OPUS_LIB): $(XC_OPUS_DIR)/build.sh $(XC_OPUS_DIR)/m4_exact.patch
+	$(E) "  OPUS   $@"
+	$(Q)bash $(XC_OPUS_DIR)/build.sh $(XC_OPUS_DIR)/opus-1.3.1 >/dev/null
+$(OBJ): | $(XC_OPUS_LIB)
+endif
+
 # Link: create ELF output file from object files.
 .SECONDARY : $(TARGET)-intermediate.elf
 .PRECIOUS : $(OBJ)
-$(TARGET)-intermediate.elf: .EXTRA_PREREQS = $(LINKERSCRIPT)
+$(TARGET)-intermediate.elf: .EXTRA_PREREQS = $(LINKERSCRIPT) $(XC_OPUS_LIB)
 $(TARGET)-intermediate.elf : $(OBJ)
 	$(E) "  LINK   $@"
 	$(Q)$(CC) $(ALL_CFLAGS) $^ --output $@ $(LDFLAGS)
@@ -428,6 +438,9 @@ clean_list :
 	$(Q)$(REMOVE) $(OBJDIR)/fw.hdr
 	$(Q)$(REMOVE) -r $(OBJDIR)/xc_soc_build $(OBJDIR)/xc_soc.bin $(OBJDIR)/xc_fw.bin $(OBJDIR)/xc_bootrom.bin
 	$(Q)$(REMOVE) $(OBJDIR)/.DS_Store
+ifneq ($(XC_OPUS_LIB),)
+	$(Q)$(REMOVE) -r $(XC_OPUS_LIB) $(XC_OPUS_DIR)/include
+endif
 	$(Q)$(REMOVE) $(LST)
 	$(Q)$(REMOVE) $(CSRC:.c=.s)
 	$(Q)$(REMOVE) $(CSRC:.c=.d)
