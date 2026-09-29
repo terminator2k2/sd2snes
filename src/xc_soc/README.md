@@ -1,6 +1,6 @@
 # xc_soc – Xeno Crisis soft CPU support
 
-Xeno Crisis (Bitmap Bureau) ships on a SNES cartridge with an RP2040 coprocessor. On the FXPAK Pro / sd2snes
+Xeno Crisis ships on a SNES cartridge with an RP2040 coprocessor. On the FXPAK Pro / sd2snes
 mk3, the `sd2snes_xc` and `sd2snes_xc_msu` FPGA cores replace the RP2040 with a soft Cortex-M0 CPU. That CPU
 runs the game's own RP2040 firmware (the flash dump `xenocrisis_rp2040.bin`) from the PSRAM.
 
