@@ -67,6 +67,8 @@ extern uint8_t fpga_boot_led;
    exists, no mk2 .bit is planned (see atari.c). */
 #define FPGA_A26 ((const uint8_t*)"/sd2snes/fpga_a26." FPGA_CONF_EXT)
 #define FPGA_BASE ((const uint8_t*)"/sd2snes/fpga_base." FPGA_CONF_EXT)
+#define FPGA_XC ((const uint8_t*)"/sd2snes/fpga_xc." FPGA_CONF_EXT)
+#define FPGA_XC_MSU ((const uint8_t*)"/sd2snes/fpga_xc_msu." FPGA_CONF_EXT)
 #define FPGA_DSP ((const uint8_t*)"/sd2snes/fpga_dsp." FPGA_CONF_EXT)
 /* Dedicated ST010/ST011 core (verilog/sd2snes_st0011). Separate from
    fpga_dsp because the uPD96050's 16384-word program needs a block-RAM

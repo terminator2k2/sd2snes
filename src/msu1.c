@@ -20,6 +20,9 @@
 #include "spc7110rtc.h"
 #include "psram_io.h"
 #include "sufami.h"
+#ifdef CONFIG_MK3
+#include "xc_audio.h"
+#endif
 
 FIL msudata;
 FIL msuaudio;
@@ -41,6 +44,9 @@ extern snes_romprops_t romprops;
 uint32_t msu_loop_point = 0;
 uint32_t msu_page1_start = 0x0000;
 uint32_t msu_page2_start = 0x2000;
+static uint8_t msu_repeat = 0;
+static uint16_t dac_msb_prev = 0;
+static uint8_t msu_loop_active = 0;
 uint16_t fpga_status_prev = 0;
 uint16_t fpga_status_now = 0;
 
@@ -99,7 +105,7 @@ static void msu_savecheck(int immediate) {
      and a subsystem wired into only one of the two is dead in the other.  Above the
      autosave gate because it carries its own CFG.enable_autosave check. */
   sufami_slotb_autosave();
-  if(!cfg_is_msu1_autosave_enabled()) {
+  if(!cfg_is_msu1_autosave_enabled() && !romprops.has_xc) {
     return;
   }
   if(immediate || (getticks() > msu_last_sram_check + MS_TO_TICKS(1000))) {
@@ -258,6 +264,54 @@ static void prepare_data(uint32_t msu_offset) {
   set_msu_status(MSU_SNES_STATUS_CLEAR_DATA_BUSY);
 }
 
+/* audio buffer refill: the DAC has moved on to the other half of its buffer */
+static void __attribute__((noinline)) msu_audio_refill(uint16_t status) {
+  if((status ^ dac_msb_prev) & MSU_FPGA_STATUS_DAC_READ_MSB) {
+    dac_msb_prev = status & MSU_FPGA_STATUS_DAC_READ_MSB;
+    set_dac_addr((status & MSU_FPGA_STATUS_DAC_READ_MSB) ? 0 : MSU_DAC_BUFSIZE / 2);
+#ifdef XC_MSU_DIAG
+    xc_msu_mcu[3]++;
+#endif	
+    sd_offload_tgt = 1;
+    ff_sd_offload = 1;
+    f_read(&msuaudio, file_buf, MSU_DAC_BUFSIZE / 2, &msu_audio_bytes_read);
+  }
+}
+
+/* end of the track: loop or stop */
+static void __attribute__((noinline)) msu_audio_end(void) {
+  if(msu_audio_bytes_read < MSU_DAC_BUFSIZE / 2) {
+    ff_sd_offload=0;
+    sd_offload=0;
+    DBG_MSU1 printf("wanted %u bytes, got %u (EOF)\n", MSU_DAC_BUFSIZE / 2, msu_audio_bytes_read);
+    if(msu_repeat) {
+      DBG_MSU1 printf("loop\n");
+      ff_sd_offload=1;
+      sd_offload_tgt=1;
+      f_lseek(&msuaudio, MSU_PCM_OFFSET_WAVEDATA + msu_loop_point * 4);
+      ff_sd_offload=1;
+      sd_offload_tgt=1;
+      DBG_MSU1 printf("---filling rest of buffer from loop point for %u bytes\n", (MSU_DAC_BUFSIZE / 2) - msu_audio_bytes_read);
+      f_read(&msuaudio, file_buf, (MSU_DAC_BUFSIZE / 2) - msu_audio_bytes_read, &msu_audio_bytes_read);
+    } else {
+      set_msu_status(MSU_SNES_STATUS_CLEAR_AUDIO_PLAY);
+      dac_pause();
+      msu_audio_usage = MSU_IDLE;
+    }
+    msu_audio_bytes_read = MSU_DAC_BUFSIZE;
+  }
+}
+
+#ifdef CONFIG_MK3
+/* Xeno Crisis MSU-1 core: keeps the music going during long MCU jobs (SRAM CRC, save), called from
+   xc_audio_service() between their sectors; the caller has deselected the FPGA */
+void msu1_audio_service(void) {
+  if(!msu_loop_active) return;
+  msu_audio_refill(fpga_status());
+  msu_audio_end();
+}
+#endif
+
 int msu1_check(uint8_t* filename) {
 /* open MSU file */
   strcpy((char*)file_buf, (char*)filename);
@@ -280,7 +334,6 @@ int msu1_loop() {
 /* it is assumed that the MSU file is already opened by calling msu1_check(). */
   uint16_t dac_addr = 0;
   uint16_t msu_addr = 0;
-  uint8_t msu_repeat = 0;
   uint16_t msu_track = 0;
   uint32_t msu_offset = 0;
   int32_t resume_msu_track = -1;
@@ -315,8 +368,15 @@ int msu1_loop() {
 
 /* audio_start, data_start, 0, audio_ctrl[1:0], ctrl_start */
   msu_res = SNES_RESET_NONE;
+  msu_repeat = 0;
   fpga_status_prev = fpga_status();
   fpga_status_now = fpga_status();
+  dac_msb_prev = fpga_status_now & MSU_FPGA_STATUS_DAC_READ_MSB;
+  msu_loop_active = 1;
+#ifdef XC_MSU_DIAG
+  tick_t xc_log_next = getticks() + MS_TO_TICKS(3000);
+  memset(xc_msu_mcu, 0, sizeof(xc_msu_mcu));
+#endif
   while(msu_res == SNES_RESET_NONE){
     /* FPGA liveness.  The main loop makes this its while condition and led_panics on
        the way out; this loop had no check at all, so a dead FPGA left it spinning on
@@ -425,21 +485,14 @@ int msu1_loop() {
     }
 
     /* Audio buffer refill */
-    if((fpga_status_now & MSU_FPGA_STATUS_DAC_READ_MSB) != (fpga_status_prev & MSU_FPGA_STATUS_DAC_READ_MSB)) {
-      if(fpga_status_now & MSU_FPGA_STATUS_DAC_READ_MSB) {
-        dac_addr = 0;
-      } else {
-        dac_addr = MSU_DAC_BUFSIZE / 2;
-      }
-      set_dac_addr(dac_addr);
-      sd_offload_tgt = 1;
-      ff_sd_offload = 1;
-      f_read(&msuaudio, file_buf, MSU_DAC_BUFSIZE / 2, &msu_audio_bytes_read);
-    }
+    msu_audio_refill(fpga_status_now);
 
     if(fpga_status_now & MSU_FPGA_STATUS_AUDIO_START) {
       /* get trackno */
       msu_track = get_msu_track();
+#ifdef XC_MSU_DIAG
+      xc_msu_mcu[0]++; xc_msu_mcu[1] = msu_track;
+#endif	  
       DBG_MSU1 printf("Audio requested! Track=%d\n", msu_track);
 
       prepare_audio_track(msu_track, (msu_track == resume_msu_track) ? resume_msu_offset : MSU_PCM_OFFSET_WAVEDATA);
@@ -455,6 +508,9 @@ int msu1_loop() {
     }
 
     if(fpga_status_now & MSU_FPGA_STATUS_CTRL_START) {
+#ifdef XC_MSU_DIAG
+      xc_msu_mcu[2]++;
+#endif		
       if(fpga_status_now & MSU_FPGA_STATUS_CTRL_RESUME_FLAG_BIT && !(fpga_status_now & MSU_FPGA_STATUS_CTRL_PLAY_FLAG_BIT)) {
         resume_msu_track = msu_track;
         resume_msu_offset = f_tell(&msuaudio);
@@ -486,32 +542,23 @@ int msu1_loop() {
     fpga_status_prev = fpga_status_now;
 
     /* handle loop / end */
-    if(msu_audio_bytes_read < MSU_DAC_BUFSIZE / 2) {
-      ff_sd_offload=0;
-      sd_offload=0;
-      DBG_MSU1 printf("wanted %u bytes, got %u (EOF)\n", MSU_DAC_BUFSIZE / 2, msu_audio_bytes_read);
-      if(msu_repeat) {
-        DBG_MSU1 printf("loop\n");
-        ff_sd_offload=1;
-        sd_offload_tgt=1;
-        f_lseek(&msuaudio, MSU_PCM_OFFSET_WAVEDATA + msu_loop_point * 4);
-        ff_sd_offload=1;
-        sd_offload_tgt=1;
-        DBG_MSU1 printf("---filling rest of buffer from loop point for %u bytes\n", (MSU_DAC_BUFSIZE / 2) - msu_audio_bytes_read);
-        f_read(&msuaudio, file_buf, (MSU_DAC_BUFSIZE / 2) - msu_audio_bytes_read, &msu_audio_bytes_read);
-      } else {
-        set_msu_status(MSU_SNES_STATUS_CLEAR_AUDIO_PLAY);
-        dac_pause();
-        msu_audio_usage = MSU_IDLE;
-      }
-      msu_audio_bytes_read = MSU_DAC_BUFSIZE;
+    msu_audio_end();
+	
+#ifdef XC_MSU_DIAG
+    /* Xeno Crisis: diagnostics to /sd2snes/xcaudio.txt, 3 s after the start and then every 10 s */
+    if(romprops.has_xc && getticks() > xc_log_next) {
+      xc_log_next = getticks() + MS_TO_TICKS(10000);
+      xc_msu_log("MSU-1");
     }
+#endif	
 
-    /* check if we can sneak in an SRAM poll / save */
-    if(is_msu_free_to_save()) {
+    /* check if we can sneak in an SRAM poll / save (Xeno Crisis: also while the music plays; the CRC and the
+       save keep the audio buffer filled through xc_audio_service()) */
+    if(is_msu_free_to_save() || romprops.has_xc) {
       msu_savecheck(0);
     }
   }
+  msu_loop_active = 0;
   dac_pause();
   f_close(&msuaudio);
   msu_audio_usage = MSU_IDLE;

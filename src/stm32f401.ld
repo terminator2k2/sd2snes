@@ -76,6 +76,14 @@ SECTIONS
   /* Addresses of in-rom data section */
   __data_load_start = LOADADDR(.data);
   __data_load_end   = __data_load_start + SIZEOF(.data);
+  /* The firmware image ends with the .data load image, which the flash region check above does not cover */
+  ASSERT(__data_load_end <= ORIGIN(flash) + LENGTH(flash), "firmware image does not fit in flash")
+  /* AHB RAM buffers (IN_AHBRAM): nothing initializes them from flash on the STM32, so do not store their
+     (zero) contents in the firmware image. Same RAM address as before (after .data, before .bss). */
+  .ahbram (NOLOAD) :
+  {
+    *(.ahbram)
+  } > ram
 
   /* Guard: .data's init image is appended after .rodata in flash via AT(), but
      its VMA region is `ram` (not flash), so ld does NOT region-check that LMA.

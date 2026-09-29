@@ -1,0 +1,20 @@
+--- a/celt/bands.c
++++ b/celt/bands.c
+@@ -43,6 +43,17 @@
+ #include "quant_bands.h"
+ #include "pitch.h"
+ 
++#ifdef XC_DECODER_ONLY
++/* sd2snes Xeno Crisis: decoder only. These are the encoder's calls in the shared band code; each one sits in an
++   "if (encode)" branch, which the decoder never takes, so none of them runs and the encoder code is not linked. */
++#define stereo_itheta(...)   0
++#define ec_encode(...)       ((void)0)
++#define ec_enc_uint(...)     ((void)0)
++#define ec_enc_bit_logp(...) ((void)0)
++#define ec_enc_bits(...)     ((void)0)
++#define alg_quant(...)       0u
++#endif
++
+ int hysteresis_decision(opus_val16 val, const opus_val16 *thresholds, const opus_val16 *hysteresis, int N, int prev)
+ {
+    int i;

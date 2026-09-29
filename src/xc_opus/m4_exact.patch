@@ -1,0 +1,27 @@
+--- a/celt/fixed_generic.h	2026-09-25 05:27:00.583739582 +0800
++++ b/celt/fixed_generic.h	2026-09-25 14:35:35.946159890 +0800
+@@ -37,21 +37,21 @@
+ #define MULT16_16SU(a,b) ((opus_val32)(opus_val16)(a)*(opus_val32)(opus_uint16)(b))
+ 
+ /** 16x32 multiplication, followed by a 16-bit shift right. Results fits in 32 bits */
+-#if OPUS_FAST_INT64
++#if OPUS_FAST_INT64 || defined(M4_EXACT) /* exact: identical to the 16x16 split below */
+ #define MULT16_32_Q16(a,b) ((opus_val32)SHR((opus_int64)((opus_val16)(a))*(b),16))
+ #else
+ #define MULT16_32_Q16(a,b) ADD32(MULT16_16((a),SHR((b),16)), SHR(MULT16_16SU((a),((b)&0x0000ffff)),16))
+ #endif
+ 
+ /** 16x32 multiplication, followed by a 16-bit shift right (round-to-nearest). Results fits in 32 bits */
+-#if OPUS_FAST_INT64
++#if OPUS_FAST_INT64 || defined(M4_EXACT) /* exact: identical to the 16x16 split below */
+ #define MULT16_32_P16(a,b) ((opus_val32)PSHR((opus_int64)((opus_val16)(a))*(b),16))
+ #else
+ #define MULT16_32_P16(a,b) ADD32(MULT16_16((a),SHR((b),16)), PSHR(MULT16_16SU((a),((b)&0x0000ffff)),16))
+ #endif
+ 
+ /** 16x32 multiplication, followed by a 15-bit shift right. Results fits in 32 bits */
+-#if OPUS_FAST_INT64
++#if OPUS_FAST_INT64 || defined(M4_EXACT) /* exact: identical to the 16x16 split below */
+ #define MULT16_32_Q15(a,b) ((opus_val32)SHR((opus_int64)((opus_val16)(a))*(b),15))
+ #else
+ #define MULT16_32_Q15(a,b) ADD32(SHL(MULT16_16((a),SHR((b),16)),1), SHR(MULT16_16SU((a),((b)&0x0000ffff)),15))

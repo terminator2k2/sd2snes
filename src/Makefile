@@ -81,6 +81,23 @@ SRC += printf.c fileops.c fpga.c fpga_spi.c snes.c smc.c bootleg.c
 SRC += memory.c filetypes.c faulthandler.c sort.c crc32.c cic.c cover.c patch.c patchmeta.c patch_copier.c theme.c
 SRC += cli.c ymodem.c rle.c msu1.c crc16.c sysinfo.c
 SRC += cfg.c cheat.c yaml.c savestate.c sgb.c sms.c atari.c nes.c nes_chr.c hwinfo.c gameinfo.c igmenu.c manual.c
+
+# Xeno Crisis (sd2snes_xc core): decode service for the soft CPU, both mk3 MCUs.
+# STM32F401 (firmware.stm): with the Opus decoder; build the library first: xc_opus/build.sh <opus-1.3.1 source dir>
+# LPC1756 (firmware.im3): no Opus (the decoder needs ~26.5 KB of contiguous RAM plus ~11 KB of stack; the LPC1756
+# has 16 KB + 16 KB, mostly used): music packets are answered as "not decoded", sound effects play normally.
+ifeq ($(CONFIG_MK3),y)
+SRC += xc_audio.c xc_load.c
+endif
+# make XC_MSU_DIAG=1: diagnostic build for the MSU-1 core (xcaudio.txt from msu1_loop), without the Opus decoder
+# (it would not fit next to it in the STM32's flash; the MSU-1 core does not use it). Not for normal use.
+ifeq ($(CONFIG_MK3_STM32),y)
+ifeq ($(XC_MSU_DIAG),)
+XC_OPUS_DIR ?= xc_opus
+XC_OPUS_LIB = $(XC_OPUS_DIR)/libopus_xc.a
+endif
+endif
+
 # Shared helpers: menu command handlers, file->PSRAM streaming, string/path
 # utilities and the YAML sidecar writer.
 SRC += menucmd.c psram_io.c strutil.c yamlw.c trainer.c cheatcode.c cheatedit.c
@@ -130,6 +147,9 @@ DEBUG = dwarf-2
 #     Use forward slashes for directory separators.
 #     For a directory that has spaces, enclose it in quotes.
 EXTRAINCDIRS =
+ifeq ($(CONFIG_MK3_STM32),y)
+EXTRAINCDIRS += $(XC_OPUS_DIR)/include
+endif
 
 # Compiler flag to set the C Standard level.
 #     c89   = "ANSI" C
@@ -140,6 +160,9 @@ CSTANDARD = -std=gnu99
 
 # Place -D or -U options here
 CDEFS = -DF_OSC=$(CONFIG_MCU_FOSC)UL
+ifneq ($(XC_MSU_DIAG),)
+CDEFS += -DXC_MSU_DIAG
+endif
 
 # Place -I options here
 CINCS = -Iinclude -Iinclude/arm
@@ -218,6 +241,9 @@ LDFLAGS += -T$(LINKERSCRIPT)
 LDFLAGS += -Wl,--gc-sections
 # Print flash/ram/ahbram usage per link (the mk2 flash is the budget to watch).
 LDFLAGS += -Wl,--print-memory-usage
+ifeq ($(CONFIG_MK3_STM32),y)
+LDFLAGS += $(XC_OPUS_LIB)
+endif
 ifeq ($(CONFIG_LINKER_RELAX),y)
   LDFLAGS += -Wl,-O9,--relax
 endif
@@ -252,10 +278,18 @@ ALL_ASFLAGS = -I. -x assembler-with-cpp $(ASFLAGS) $(CDEFS)
 # Default target.
 all: build
 
-build: elf bin hex
+build: elf bin hex xc_soc
 	$(E) "  SIZE   $(TARGET).elf"
 	$(Q)$(ELFSIZE)|grep -v debug
 	cp $(TARGET).bin $(OBJDIR)/$(CONFIG_FW_FILE)
+	
+# Xeno Crisis (mk3): the soft CPU support file, built with the firmware so that the two always match; it goes
+# to /sd2snes/ next to the firmware (the top-level Makefile puts it in the release). See xc_soc/Makefile.
+xc_soc:
+ifeq ($(CONFIG_MK3),y)
+	$(Q)$(MAKE) -s -C xc_soc OUT=../$(OBJDIR)
+endif
+.PHONY: xc_soc	
 
 elf: $(TARGET).elf
 bin: $(TARGET).bin
@@ -322,6 +356,15 @@ $(OBJDIR)/%.lss: $(OBJDIR)/%.elf
 $(OBJDIR)/%.sym: $(OBJDIR)/%.elf
 	$(E) "  SYM    $<"
 	$(E)$(NM) -n $< > $@
+	
+# Xeno Crisis (STM32): the Opus decoder library and its headers, built before anything is compiled (xc_audio.c
+# includes opus.h) and linked into the firmware
+ifneq ($(XC_OPUS_LIB),)
+$(XC_OPUS_LIB): $(XC_OPUS_DIR)/build.sh $(XC_OPUS_DIR)/m4_exact.patch $(XC_OPUS_DIR)/xc_nodownsample.patch $(XC_OPUS_DIR)/xc_decoder_only.patch
+	$(E) "  OPUS   $@"
+	$(Q)bash $(XC_OPUS_DIR)/build.sh $(XC_OPUS_DIR)/opus-1.3.1 >/dev/null
+$(OBJ): | $(XC_OPUS_LIB)
+endif	
 
 # Link: create ELF output file from object files.
 .SECONDARY : $(TARGET)-intermediate.elf
@@ -387,6 +430,7 @@ clean_list :
 	$(Q)$(REMOVE) $(OBJDIR)/version.h
 	$(Q)$(REMOVE) $(OBJDIR)/${CONFIG_FW_FILE}
 	$(Q)$(REMOVE) $(OBJDIR)/fw.hdr
+	$(Q)$(REMOVE) -r $(OBJDIR)/xc_soc_build $(OBJDIR)/xc_soc.bin $(OBJDIR)/xc_fw.bin $(OBJDIR)/xc_bootrom.bin
 	$(Q)$(REMOVE) $(OBJDIR)/.DS_Store
 	$(Q)$(REMOVE) $(LST)
 	$(Q)$(REMOVE) $(CSRC:.c=.s)

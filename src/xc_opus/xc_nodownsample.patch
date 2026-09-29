@@ -1,0 +1,35 @@
+--- a/silk/resampler.c
++++ b/silk/resampler.c
+@@ -123,6 +123,11 @@
+             up2x = 1;
+         }
+     } else if ( Fs_Hz_out < Fs_Hz_in ) {
++#ifdef XC_NO_DOWNSAMPLE
++        /* sd2snes Xeno Crisis: the decoder output (24 kHz) is never below SILK's internal rate */
++        celt_assert( 0 );
++        return -1;
++#else
+         /* Downsample */
+          S->resampler_function = USE_silk_resampler_private_down_FIR;
+         if( silk_MUL( Fs_Hz_out, 4 ) == silk_MUL( Fs_Hz_in, 3 ) ) {             /* Fs_out : Fs_in = 3 : 4 */
+@@ -154,6 +159,7 @@
+             celt_assert( 0 );
+             return -1;
+         }
++#endif
+     } else {
+         /* Input and output sampling rates are equal: copy */
+         S->resampler_function = USE_silk_resampler_copy;
+@@ -199,10 +205,12 @@
+             silk_resampler_private_IIR_FIR( S, out, S->delayBuf, S->Fs_in_kHz );
+             silk_resampler_private_IIR_FIR( S, &out[ S->Fs_out_kHz ], &in[ nSamples ], inLen - S->Fs_in_kHz );
+             break;
++#ifndef XC_NO_DOWNSAMPLE
+         case USE_silk_resampler_private_down_FIR:
+             silk_resampler_private_down_FIR( S, out, S->delayBuf, S->Fs_in_kHz );
+             silk_resampler_private_down_FIR( S, &out[ S->Fs_out_kHz ], &in[ nSamples ], inLen - S->Fs_in_kHz );
+             break;
++#endif
+         default:
+             silk_memcpy( out, S->delayBuf, S->Fs_in_kHz * sizeof( opus_int16 ) );
+             silk_memcpy( &out[ S->Fs_out_kHz ], &in[ nSamples ], ( inLen - S->Fs_in_kHz ) * sizeof( opus_int16 ) );
