@@ -57,7 +57,7 @@ The extra patch table sits after the main one, so the mk3 firmware and older Mes
   300-frame pieces): 3.13 billion instructions and about 40,000 interrupt entries, 0 mismatches. The first 1,200
   frames (start-up, menus) ran in lockstep without a mismatch too.
 - **Game on the Verilated SoC** (RTL-in-the-loop: `xc_top` with these two files, MSU-1, 4 KB caches, 40.25 MHz), 3,600
-  frames: no halt, and every core and DMA access checked against the reference memory (354 million reads, 38 million
+  frames (with the NVIC change of the last commit: 2,550 frames, then the simulation was stopped): no halt, and every core and DMA access checked against the reference memory (354 million reads, 38 million
   writes, 3.4 MB of DMA) without a mismatch. Compared with the mk3 SoC (16 KB caches), the CPU is busy for longer
   (instruction-fetch stalls 11% of the cycles instead of 2%), but it still spends a third of its time waiting for the
   SNES, and the answer to a frame message takes 7.2 ms (median; 13 ms at the 99th percentile) instead of 6.1 ms.
