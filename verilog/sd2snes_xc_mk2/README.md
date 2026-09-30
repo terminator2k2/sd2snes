@@ -52,8 +52,18 @@ The extra patch table sits after the main one, so the mk3 firmware and older Mes
   same data (7,134 stream transfers, 3,227,563 bytes). The audio differs in four short stretches (about 3% of the
   samples), where sound effects start a tick earlier or later: software division changes the CPU timing slightly.
   Division adds about 366,000 instructions per minute, a negligible load.
-- **Game on this core in lockstep** with the interpreter, and **the game on the Verilated SoC** (RTL-in-the-loop,
-  MSU-1, 4 KB caches): see the results below.
+- **Game on this core in lockstep** with the interpreter (every instruction's registers, flags and memory accesses
+  compared), mk2 mode, from save states through the gameplay part of the test script (frames 1,200-3,600, in
+  300-frame pieces): 3.13 billion instructions and about 40,000 interrupt entries, 0 mismatches. The first 1,200
+  frames (start-up, menus) ran in lockstep without a mismatch too.
+- **Game on the Verilated SoC** (RTL-in-the-loop: `xc_top` with these two files, MSU-1, 4 KB caches, 40.25 MHz), 3,600
+  frames: no halt, and every core and DMA access checked against the reference memory (354 million reads, 38 million
+  writes, 3.4 MB of DMA) without a mismatch. Compared with the mk3 SoC (16 KB caches), the CPU is busy for longer
+  (instruction-fetch stalls 11% of the cycles instead of 2%), but it still spends a third of its time waiting for the
+  SNES, and the answer to a frame message takes 7.2 ms (median; 13 ms at the 99th percentile) instead of 6.1 ms.
+  One earlier run halted after the last frame, while the simulator was shutting down (bus access to an address
+  equal to the timer value); the same design ran through that point cleanly on a rerun, so it looks like a
+  test-bench artefact, but keep an eye on it.
 
 ## Size
 
