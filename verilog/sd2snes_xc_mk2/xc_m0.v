@@ -741,6 +741,7 @@ always @* begin
   endcase
 end
 
+wire [31:0] rf_dbg = rf[dbg_rsel[3:0] == 4'd15 ? 4'd14 : dbg_rsel[3:0]];   // a wire: XST rejects memory reads in always @*
 always @* begin
   if(!DEBUG) dbg_rdata = 32'd0;
   else case(dbg_rsel)
@@ -752,7 +753,7 @@ always @* begin
     5'd21: dbg_rdata = stat_cycles[63:32];
     5'd22: dbg_rdata = stat_instr[31:0];
     5'd23: dbg_rdata = stat_instr[63:32];
-    default: dbg_rdata = rf[dbg_rsel[3:0] == 4'd15 ? 4'd14 : dbg_rsel[3:0]];
+    default: dbg_rdata = rf_dbg;
   endcase
 end
 
