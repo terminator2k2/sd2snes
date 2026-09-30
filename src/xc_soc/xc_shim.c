@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include "xc_soc.h"
 
+void xc_mix_poll(void);   /* mk2: runs the mixer ticks that are due (xc_mix.c); nothing on mk3 */
+
 static uint64_t now_us(void)
 {
 	uint32_t hi, lo;
@@ -36,6 +38,7 @@ int xc_bus_wait_tx(void)
 {
 	/* the RP2040 version waits for its TX DMA; the PIO FIFO holds 8 more bytes */
 	while(XW_TX_PENDING > 8) {
+		xc_mix_poll();
 	}
 	return 0;
 }
@@ -49,6 +52,7 @@ int xc_bus_send(void* unused, volatile uint32_t* desc)
 		return 0;
 	}
 	while(XW_TX_PENDING > 8 || XW_TX_FREE == 0) {
+		xc_mix_poll();
 	}
 	uint32_t off = desc[2];
 	XW_TX_ADDR = desc[0] + off;
@@ -78,6 +82,7 @@ int xc_bus_recv(void* unused, uint8_t* dst, uint32_t count, uint32_t timeout_ms)
 		if(timeout_ms != 0xFFFFFFFFu && now_us() - start >= (uint64_t)timeout_ms * 1000) {
 			return (int)got;
 		}
+		xc_mix_poll();
 	}
 }
 
@@ -94,6 +99,7 @@ int xc_bus_push(void* unused, const uint8_t* src, uint32_t count)
 void xc_sleep_until(uint64_t t)
 {
 	while(now_us() < t) {
+		xc_mix_poll();
 	}
 }
 

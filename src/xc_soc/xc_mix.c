@@ -115,6 +115,8 @@ static struct {
 	uint32_t ms_paused;
 	uint32_t ms_seen_play;   /* the MSU-1 reported playing since the last play command */
 	uint32_t ms_age;         /* ticks since the last play command */
+	uint32_t coop;           /* mk2 core: no tick IRQ or BRR encoder; run from the firmware's wait loops, silent */
+	uint32_t coop_next;      /* mk2: time of the next tick (microseconds, low 32 bits of the timer) */
 } st;
 
 static void music_after_decode(int have_decode, int32_t ret);
@@ -129,6 +131,11 @@ struct xc_dbg {
 	uint32_t msu_writes, msu_status, track;
 };
 static struct xc_dbg dbg __attribute__((section(".bss.xc_dbg"), used));
+
+/* mk2: XC_COOP_MAGIC once xc_mix_install_mk2() ran; until then xc_mix_poll() does nothing (checked by the wrapper
+   in xc_mix_entry.S; a magic value, because the mk2 core does not clear the RAM at start) */
+#define XC_COOP_MAGIC 0x434F4F50u   /* "COOP" */
+uint32_t xc_mix_coop;
 
 /* ---- MSU-1 mode (fpga_xc_msu.bi3: CTRL bit 3) ----
  * The music comes from an MSU-1 pack. The packets are still walked at the same pace (the game's music
@@ -234,7 +241,7 @@ static void call_begin(void)
 	if(R8(Locks + 0)) {
 		return;
 	}
-	R32(Core1Parked) = 0;
+	if(!st.coop) R32(Core1Parked) = 0;   /* mk2: core 1 counts as parked whenever core 0 runs (see xc_mix_poll) */
 	XC_MIX_EVENT = XC_EV_CALL_BEGIN;
 	dbg.calls++;
 
@@ -440,10 +447,63 @@ static void mix(void)
 	XC_MIX_EVENT = XC_EV_CALL_END;
 }
 
+/* ---- mk2 (no BRR encoder): silent blocks ----
+ * What xc_brr gives for 16 zero samples: every shift has error 0 and the first (12) wins, header 12 << 4 | loop
+ * flag, all nibbles 0. The ring's last block also gets the END flag, as in encode_to_ring(). */
+static void silent_to_ring(uint32_t ring, uint32_t write_reg, uint32_t free_reg)
+{
+	uint32_t offset = R32(write_reg);
+	R32(free_reg) = R32(free_reg) - 9;
+	uint32_t dst = ring + offset;
+	R32(write_reg) = (offset + 9) % BrrRingSize;
+	R8(dst) = 0xC2u | ((dst == ring + BrrRingSize - 9) ? 1u : 0u);
+	for(uint32_t i = 1; i < 9; i++) R8(dst + i) = 0;
+}
+
+/* a voice through one 16-sample block without its samples: the same position and end as mix_blocks() */
+static void voice_skip(uint32_t v)
+{
+	int32_t length = (int32_t)R32(v);
+	int32_t pos = (int32_t)R32(v + 0x0C), step = (int32_t)R32(v + 0x08);
+	/* fast path: the position only grows and the 16th sample is still inside the sound */
+	if(step >= 0 && pos >= 0 && pos <= 0x7FFFFFFF - 16 * step && div_pow2(pos + 15 * step, 15) < length) {
+		R32(v + 0x0C) = (uint32_t)(pos + 16 * step);
+		return;
+	}
+	for(int i = 0; i < 16; i++) {
+		pos = (int32_t)R32(v + 0x0C);
+		int32_t idx = div_pow2(pos, 15);
+		if(length <= idx || pos < (int32_t)0xFFFF8001u) {
+			R8(v + 0x1C) = 0;
+			R8(v + 0x1D) = 1;
+			break;
+		}
+		R32(v + 0x0C) = (uint32_t)((int32_t)R32(v + 0x08) + pos);
+	}
+}
+
 /* 16-sample blocks while the BRR rings have room; music from the decoded part of the PCM ring only */
 static void mix_blocks(void)
 {
 	while(R32(BrrLeftFree) > 8) {
+		if(st.coop) {
+			/* mk2: the music comes from the MSU-1; the ring still paces the game's music position */
+			if(R8(MusicPlaying)) {
+				uint32_t free_count = R32(PcmFree);
+				if(((PcmRingSize - free_count - st.held) >> 5) != 0) {
+					R32(PcmFree) = free_count + 0x20;
+					R32(PcmRead) = (R32(PcmRead) + 0x20) % PcmRingSize;
+				}
+			}
+			for(uint32_t voice = 0; voice < 4; voice++) {
+				uint32_t v = Voices + voice * 32;
+				if(R8(v + 0x1C)) voice_skip(v);
+			}
+			dbg.blocks++;
+			silent_to_ring(BrrLeft, BrrLeftWrite, BrrLeftFree);
+			silent_to_ring(BrrRight, BrrRightWrite, BrrRightFree);
+			continue;
+		}
 		int32_t left[16], right[16];
 		int music = 0;
 		if(R8(MusicPlaying)) {
@@ -517,6 +577,28 @@ void xc_mix_decoded(void)
 	}
 }
 
+/* ---- mk2: the mixer without interrupts ----
+ * The mk2 core has no tick timer, interrupts or BRR encoder (no room in the XC3S400). The firmware's wait loops
+ * (bus layer, sleep_until: xc_shim.c) call xc_mix_poll(), which runs the 1 kHz ticks that are due, up to
+ * COOP_CATCHUP at a time; after a longer gap the rest are dropped (the BRR rings are full after a few ticks
+ * anyway). Music: the same track logic as the mk3 MSU-1 core. Sound effects: their voices run (start, position,
+ * end) as on mk3, but nothing is mixed: the BRR rings get silence. Core 1 counts as parked all the time, because
+ * the mixer only ever runs inside a call made by core 0 (core 0's flash save waits for Core1Parked in a loop that
+ * calls nothing). */
+#define COOP_CATCHUP 16u
+static uint32_t timer_lo(void) { return *(volatile uint32_t*)0x40054028u; }   /* TIMERAWL */
+
+void xc_mix_poll_body(void)
+{
+	uint32_t now = timer_lo();
+	uint32_t n = 0;
+	while((int32_t)(now - st.coop_next) >= 0) {
+		if(n++ == COOP_CATCHUP) { st.coop_next = now + 1000u; break; }
+		st.coop_next += 1000u;
+		xc_mix_tick();
+	}
+}
+
 /* ---- replaces multicore_launch_core1(core1_entry) in the firmware ---- */
 extern void xc_irq_tick(void);
 extern void xc_irq_decoded(void);
@@ -541,4 +623,20 @@ void xc_mix_install(void (*entry)(void))
 	vt[16 + XC_IRQ_DEC] = (uint32_t)xc_irq_decoded;
 	XC_TICK_PERIOD = 1000;
 	*(volatile uint32_t*)0xE000E100u = (1u << XC_IRQ_TICK) | (1u << XC_IRQ_DEC); /* NVIC ISER */
+}
+
+/* mk2 (the "MK2P" table redirects multicore_launch_core1 here): no interrupts, xc_mix_poll() runs the ticks */
+void xc_mix_install_mk2(void (*entry)(void))
+{
+	for(uint32_t* p = &__bss_start__; p < &__bss_end__; p++) *p = 0;
+	st.msu = 1;                     /* the mk2 core is MSU-1 only (no decode mailbox) */
+	st.coop = 1;
+	dbg.magic = 0x58494D58u;         /* "XMIX" */
+	if(st.msu) msu_reg(7, 0);       /* SNES reset: stop what the MSU-1 was playing */
+	R32(DecoderPtr) = 0x0DEC0DE0u;
+	R32(DecoderErr) = 0;
+	R8(ResetFlag) = 1;
+	R32(Core1Parked) = 1;
+	st.coop_next = timer_lo();
+	xc_mix_coop = XC_COOP_MAGIC;
 }
