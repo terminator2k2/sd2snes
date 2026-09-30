@@ -21,7 +21,7 @@ these files and are unchanged.
 | File | Contents |
 |---|---|
 | `main.v` | the Xeno Crisis `main.v` with its mk2 branch; adds `soc_dcm` for the soft CPU clock |
-| `dcm.v` | `my_dcm` (CLK2 = 24 MHz x 25 / 7 = 85.7 MHz, as in the gsu core) and `soc_dcm` (soft CPU: 24 MHz x 5 / 3 = 40 MHz) |
+| `dcm.v` | `my_dcm` (CLK2 = 24 MHz x 25 / 7 = 85.7 MHz, as in the gsu core) and `soc_dcm` (soft CPU: 24 MHz x 5 / 6 = 20 MHz) |
 | `main.ucf` | the mk2 pinout (as sd2snes_gsu) plus TIG between CLK2 and the soft CPU clock (the paths through `xc_bridge`'s synchronizers) |
 | `xc_m0.v` | soft CPU core: register file in LUT RAM, no ROR/REV16/REVSH, MRS/MSR IPSR/PRIMASK only, no interrupts, no early fetch |
 | `xc_soc.v` | SoC: one 16 KB 2-way write-through cache for code and data, no divider, fixed APB reads, no BRR/tick/NVIC, 40-bit timer, no RAM clear at start, halt address not captured, no adders for the fixed PSRAM offsets |
@@ -40,14 +40,19 @@ Block RAM: cache data 8 (one per byte lane and way), cache tags 2, window rings 
 |---|---|---|---|
 | first build (XST speed) | 3,752 of 3,584 (105%) | 6,624 (92%) | 2,916 |
 | XST area | 3,766 (105%) | 6,660 (92%) | 2,917 |
-| + 40-bit timer, no RAM clear, no halt address, no offset adders, DAC without interpolation | (to be built; Yosys: −520 LUTs, −180 flip-flops) | | |
+| + 40-bit timer, no RAM clear, no halt address, no offset adders, DAC without interpolation | 3,582 of 3,584 (99.9%) | | |
+
+Timing of that build (40 MHz soft CPU): the CPU's worst path is 45 ns (fetch-buffer compare, decode, register read,
+shifter/ALU, next PC; more than half of it routing), about 22 MHz; CLK2 misses 85.7 MHz by 9.6 ns on ordinary sd2snes
+paths (brightness patch, SD clock, bridge synchronizer), because the full chip forces long routes. The soft CPU now runs
+at 20 MHz.
 
 ## Things to look at in the ISE reports
 
 - **Utilisation:** slices / LUTs (map report). Yosys estimates it at 7,859 LUTs (6,187 without LUT1 buffers) plus 144
   RAM16X1D, about 1.2–1.3x the gsu3 (FX3) core measured the same way (see "Size").
-- **Timing:** CLK2 (85.7 MHz) and the soft CPU clock (40 MHz). If the soft CPU misses timing, try 32 MHz: in `dcm.v`
-  set `soc_dcm` to `.CLKFX_MULTIPLY(4)`, and in `main.v` set `.SOC_CLK_NUM(32)`.
+- **Timing:** CLK2 (85.7 MHz) and the soft CPU clock (20 MHz). The CPU's worst path is 45 ns on the Spartan-3 -4
+  (about 22 MHz); 40 MHz, as on mk3, would be `soc_dcm` x 5 / 3 and `.SOC_CLK_NUM(40)` in `main.v`.
 - The XST optimisation settings are the gsu core's (speed). If mapping fails for lack of space, try Optimization Goal
   = Area in the project properties.
 

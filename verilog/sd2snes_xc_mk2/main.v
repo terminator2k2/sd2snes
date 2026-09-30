@@ -423,9 +423,9 @@ wire [31:0] xc_halt_code, xc_halt_addr;
 wire        xc_perf_snap;
 wire [255:0] xc_perf;
 
-// mk2: soft CPU clock 40 MHz (soc_dcm: 24 MHz x 5 / 3, must match SOC_CLK_NUM / SOC_CLK_DEN); one 2-way cache for
+// mk2: soft CPU clock 20 MHz (soc_dcm: 24 MHz x 5 / 6, must match SOC_CLK_NUM / SOC_CLK_DEN); one 2-way cache for
 // code and data, 2^DIDX sets x 2 ways x 32 B (8 = 16 KB: 8 block RAMs for the data, one per byte lane and way)
-xc_top #(.SOC_CLK_NUM(40), .SOC_CLK_DEN(1), .STATS(0), .DIDX(8)) snes_xc (
+xc_top #(.SOC_CLK_NUM(20), .SOC_CLK_DEN(1), .STATS(0), .DIDX(8)) snes_xc (
   .clk2(CLK2),
   .clk_soc(CLK_SOC),
   .rst2(SNES_DEADr),

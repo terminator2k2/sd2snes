@@ -1,7 +1,7 @@
 NET "CLKIN" TNM_NET = "CLKIN";
 TIMESPEC TS_CLKIN = PERIOD "CLKIN" 24.01 MHz HIGH 50 %;
 
-# Xeno Crisis: the soft CPU clock (soc_dcm, 40 MHz) and CLK2 (85.7 MHz) both come from CLKIN, so ISE derives their
+# Xeno Crisis: the soft CPU clock (soc_dcm, 20 MHz) and CLK2 (85.7 MHz) both come from CLKIN, so ISE derives their
 # periods from TS_CLKIN and would time the paths between them at their closest edge distance. Those paths go only
 # through xc_bridge's toggle synchronizers and dual-clock RAMs, which are read only when the other side leaves them
 # alone (like set_clock_groups in the mk3 core's main.sdc), so they are not timed.
