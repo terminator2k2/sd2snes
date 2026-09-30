@@ -662,7 +662,7 @@ static void load_saveram(const load_ctx_t *c) {
     sram_memset(SRAM_SAVE_ADDR, romprops.ramsize_bytes, romprops.has_gsu ? 0x00 : 0xFF);
     if (romprops.sramsize_bytes) migrate_and_load_srm(filename, SRAM_SAVE_ADDR);
 
-#ifdef CONFIG_MK3
+#ifdef XC_SUPPORT
     /* Xeno Crisis: initialize the save from the RP2040 flash dump
        when no existing .srm file was found. */
     if (romprops.has_xc && file_res == FR_NO_FILE) {
@@ -750,7 +750,6 @@ static void load_bs_pack_slot(const load_ctx_t *c) {
       }
     }
   }
-
 }
 
 /* Everything the FPGA has to know before the SNES comes out of reset: the $213F
@@ -758,11 +757,10 @@ static void load_bs_pack_slot(const load_ctx_t *c) {
    Ordering matters -- see the NES/Atari invariant below. */
 static void load_set_features(const load_ctx_t *c) {
   uint8_t *filename = c->filename;
-  uint8_t  is_menu  = c->is_menu;
+  uint8_t is_menu = c->is_menu;
   printf("r213fen=%d is_u16=%d filename=%s\n", cfg_is_r213f_override_enabled(), STS.is_u16, filename);
   if(cfg_is_r213f_override_enabled() && !is_menu && !STS.is_u16) {
-    romprops.fpga_features |= FEAT_213F; /* e.g. for general consoles */
-
+    romprops.fpga_features |= FEAT_213F;
   }
   fpga_set_213f(romprops.region);
 //  fpga_set_features(romprops.fpga_features);
@@ -794,10 +792,10 @@ static void load_set_features(const load_ctx_t *c) {
       }
     }
   }
-
-  if(cfg_is_onechip_transient_fixes() && !is_menu) {
+if(cfg_is_onechip_transient_fixes() && !is_menu) {
     romprops.fpga_features |= FEAT_2100;
   }
+
   romprops.fpga_features |= FEAT_2100_LIMIT(cfg_get_brightness_limit());
 
   /* enable Satellaview Base emulation only if no physical Satellaview Base unit is present */
@@ -1162,7 +1160,6 @@ static uint32_t load_open(load_ctx_t *c) {
     if(!load_sfrom_info(&rom_off, &rom_size, file_handle.fsize)) {
       file_close();
       return load_abort_missing(flags, MENU_ERR_FS, path_leaf((const char*)filename));
-
     }
     c->file_offset = rom_off;
     c->filesize    = rom_size;
@@ -1232,6 +1229,7 @@ static uint32_t load_stage_consoles(load_ctx_t *c) {
   if (!sgb_update_file(&filename)) {
     return load_abort_missing(flags, MENU_ERR_SUPPLFILE, path_leaf(SGBSR));
   }
+
 
   /* NES detect and file management (espelha o fluxo SGB acima; nes_id e' stub
      no-op no mk2 -> has_nes fica 0 e nada disto dispara).  Mapper fora do
@@ -1520,10 +1518,15 @@ static uint32_t load_check_prereqs(load_ctx_t *c) {
 /* Swap the FPGA core in for this game.  The SNES is parked in game_handshake and
    the menu SFX teardown is deliberately deferred to here -- see inside. */
 static void load_reconfigure_fpga(const load_ctx_t *c) {
-#ifdef CONFIG_MK3
-  /* Select the Xeno Crisis MSU-1 FPGA core when a pack exists. */
+#ifdef XC_SUPPORT
   if(romprops.has_xc) {
+#ifdef CONFIG_MK2
+    /* MK2: dedicated Xeno Crisis FPGA core. */
+    romprops.fpga_conf = FPGA_XC_MK2;
+#else
+    /* MK3: select the MSU-1 version when a music pack exists. */
     romprops.fpga_conf = xc_msu_pack(c->filename) ? FPGA_XC_MSU : FPGA_XC;
+#endif
   }
 #endif
 #if RECORE_PSRAM_KEEP
@@ -1625,7 +1628,7 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
 
   printf("done\n");
 
-#ifdef CONFIG_MK3
+#ifdef XC_SUPPORT
   /* Xeno Crisis: build the complete image from the 128 KB SNES ROM.
      Larger prebuilt images do not require rebuilding. */
   if (romprops.has_xc && c.filesize == 0x20000) {
@@ -1698,15 +1701,17 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
     romprops.fpga_features |= FEAT_MSU1;
     romprops.has_msu1 = 1;
   }
-#ifdef CONFIG_MK3
+#ifdef XC_SUPPORT
   if(romprops.has_xc) {
     /* The Xeno Crisis soft CPU drives MSU-1, not the SNES. */
     romprops.fpga_features &= ~FEAT_MSU1;
 
-    /* Without the Xeno MSU FPGA core, disable MSU-1 entirely. */
+#ifndef CONFIG_MK2
+    /* MK3: without the Xeno MSU FPGA core, disable MSU-1. */
     if(romprops.fpga_conf != FPGA_XC_MSU) {
       romprops.has_msu1 = 0;
     }
+#endif
   }
 #endif
   printf("done\n");
@@ -1816,9 +1821,10 @@ void init(uint8_t *filename) {
      savestate_program().  Probed on hardware: with the body live, 5/5 clean
      resumes and the reset-loop path never fires during a resume. */
   if (CFG.reset_patch) snescmd_writebyte(0, SNESCMD_RESET_HOOK+1);
-#ifdef CONFIG_MK3
-  /* Xeno Crisis: the image and save are loaded; start the soft CPU with the SNES */
-  if (romprops.has_xc) xc_run(1);
+
+#ifdef XC_SUPPORT
+  /* Xeno Crisis: the image and the save are loaded now; the soft CPU starts with the SNES */
+  if(romprops.has_xc) xc_run(1);
 #endif
 
   /*
@@ -2327,7 +2333,7 @@ int save_sram(uint8_t* filename, uint32_t sram_size, uint32_t base_addr) {
       return 0;
     }
     remain -= copy;
-#ifdef CONFIG_MK3
+#ifdef XC_SUPPORT
     /* Xeno Crisis: saving takes a while (SD card); serve the Opus decode service after every sector */
     if(romprops.has_xc && remain) {
       FPGA_DESELECT();
@@ -2352,9 +2358,11 @@ uint32_t calc_sram_crc(uint32_t base_addr, uint32_t size, uint32_t crc) {
   FPGA_TX_BYTE(FPGA_CMD_READMEM | FPGA_MEM_AUTOINC);
 
   for(count=0; count<size; count++) {
-#ifdef CONFIG_MK3
-    /* Xeno Crisis: service audio periodically during SRAM CRC. */
-    if (romprops.has_xc && count && !(count & 511)) {
+
+#ifdef XC_SUPPORT
+    /* Xeno Crisis: the 32 KB CRC takes ~20 ms; serve the Opus decode service in between */
+    if(romprops.has_xc && count && !(count & 511)) {
+
       FPGA_DESELECT();
       xc_audio_service();
       set_mcu_addr(base_addr + count);
@@ -2403,7 +2411,7 @@ uint8_t sram_reliable() {
   uint32_t val;
   uint8_t result = 0;
   uint16_t n = SRAM_RELIABILITY_SCORE;
-#ifdef CONFIG_MK3
+#ifdef XC_SUPPORT
   /* Xeno Crisis: 256 reads take ~12 ms here, because the soft CPU has priority on the ROM bus, and they take
      bus slots from its flash fetches meanwhile (the game slows down). A few reads still catch a dead PSRAM. */
   if(romprops.has_xc) n = 4;

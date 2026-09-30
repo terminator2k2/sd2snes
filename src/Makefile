@@ -103,7 +103,8 @@ SRC += sufami.c
 # xc_opus/opus-1.3.1 (xc_opus/build.sh; needs bash and patch)
 # LPC1756 (firmware.im3): no Opus (the decoder needs ~26.5 KB of contiguous RAM plus ~11 KB of stack; the LPC1756
 # has 16 KB + 16 KB, mostly used): music packets are answered as "not decoded", sound effects play normally.
-ifeq ($(CONFIG_MK3),y)
+# mk2 (LPC1754, fpga_xc_mk2.bit): MSU-1 only, no decode service; the loader applies the mk2 patch table as well.
+ifneq ($(filter y,$(CONFIG_MK3) $(CONFIG_MK2)),)
 SRC += xc_audio.c xc_load.c
 endif
 # make XC_MSU_DIAG=1: diagnostic build for the MSU-1 core (xcaudio.txt from msu1_loop), without the Opus decoder
@@ -289,10 +290,10 @@ build: elf bin hex xc_soc
 	$(Q)$(ELFSIZE)|grep -v debug
 	cp $(TARGET).bin $(OBJDIR)/$(CONFIG_FW_FILE)
 
-# Xeno Crisis (mk3): the soft CPU support file, built with the firmware so that the two always match; it goes
-# to /sd2snes/ next to the firmware (the top-level Makefile puts it in the release). See xc_soc/Makefile.
+# Xeno Crisis (mk3, mk2): the soft CPU support file, built with the firmware so that the two always match; it goes
+# to /sd2snes/ next to the firmware (the top-level Makefile puts the mk3 one in the release). See xc_soc/Makefile.
 xc_soc:
-ifeq ($(CONFIG_MK3),y)
+ifneq ($(filter y,$(CONFIG_MK3) $(CONFIG_MK2)),)
 	$(Q)$(MAKE) -s -C xc_soc OUT=../$(OBJDIR)
 endif
 .PHONY: xc_soc

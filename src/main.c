@@ -520,14 +520,13 @@ int main(void) {
     wd_loop_enter();
 #endif
 
-#ifdef CONFIG_MK3
+#ifdef XC_SUPPORT
     if(romprops.has_xc) xc_audio_init();
 #endif
 
     while(LOOP_FPGA_TEST() == FPGA_TEST_TOKEN) {
       cli_entrycheck();
-
-#ifdef CONFIG_MK3
+#ifdef XC_SUPPORT
       if(romprops.has_xc) xc_audio_poll();   /* Xeno Crisis: decode service (Opus on STM32 only) */
 #endif
 
@@ -539,17 +538,18 @@ int main(void) {
 //        sleep_ms(250);
 WD_SITE(WD_SITE_SRAM_REL);
 
-#ifdef CONFIG_MK3
+#ifdef XC_SUPPORT
       /* Xeno Crisis: avoid repeated PSRAM reads that delay audio decoding.
          The SRAM check is still performed periodically in snes_main_loop(). */
       if (!romprops.has_xc)
 #endif
         sram_reliable();
+
       /* NES in-game debug snapshot ("NDBG" @ PSRAM 0x400100): PC/regs do
-         6502 + contadores da bridge, lidos da config-bus (grupo 0x04) e
-         publicados 1x/iteracao.  No-op sem .nes; bounded (ver nes.c). */
-      WD_SITE(WD_SITE_NES_DBG);
-      nes_dbg_publish();
+           6502 + contadores da bridge, lidos da config-bus (grupo 0x04) e
+           publicados 1x/iteracao.  No-op sem .nes; bounded (ver nes.c). */
+        WD_SITE(WD_SITE_NES_DBG);
+        nes_dbg_publish();
       
       // loop if we are in the middle of a reset
       if (usbint_server_reset()) continue;
@@ -562,11 +562,11 @@ WD_SITE(WD_SITE_SRAM_REL);
         fpga_reset_srtc_state();
       }
       uint8_t resetState = get_snes_reset_state();
-      if(resetState == SNES_RESET_LONG) {
+     if(resetState == SNES_RESET_LONG) {
         STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
 
-#ifdef CONFIG_MK3
-        if (romprops.has_xc) xc_audio_report();
+#ifdef XC_SUPPORT
+        if(romprops.has_xc) xc_audio_report();
 #endif
         prepare_reset();
         break;
@@ -579,7 +579,7 @@ WD_SITE(WD_SITE_SRAM_REL);
 
           WD_SITE(WD_SITE_CIC_PRINT);
 
-#ifdef CONFIG_MK3
+#ifdef XC_SUPPORT
           /* Xeno Crisis: skip the expensive CIC state debug print. */
           if (!romprops.has_xc)
 #endif
@@ -611,14 +611,14 @@ WD_SITE(WD_SITE_SRAM_REL);
                 snes_reset_pulse();
                 break;
               case SNES_CMD_RESET_TO_MENU:
-                usb_cmd = 0;
-                STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
+                  usb_cmd = 0;
+                  STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
 
-#ifdef CONFIG_MK3
-                if (romprops.has_xc) xc_audio_report();
+#ifdef XC_SUPPORT
+                  if(romprops.has_xc) xc_audio_report();
 #endif
-                prepare_reset();
-                goto snes_loop_out;
+                  prepare_reset();
+                  goto snes_loop_out;
               case SNES_CMD_COMBO_TRANSITION:
                 usb_cmd = 0;
                 load_rom(file_lfn, SRAM_ROM_ADDR, LOADROM_WITH_COMBO | LOADROM_WITH_RESET);

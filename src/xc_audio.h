@@ -6,6 +6,11 @@
 #define XC_AUDIO_H
 #include <stdint.h>
 
+/* Xeno Crisis support in the firmware: mk3 (fpga_xc.bi3, fpga_xc_msu.bi3) and mk2 (fpga_xc_mk2.bit, MSU-1 only) */
+#if defined(CONFIG_MK3) || defined(CONFIG_MK2)
+#define XC_SUPPORT
+#endif
+
 /* FPGA commands (mcu_cmd.v, handled by xc_decbox.v) */
 #define FPGA_CMD_XCA_STATUS    (0xc0)  /* read: status byte, packet length (2 bytes, little-endian) */
 #define   XCA_ST_JOB           0x01    /* a packet is waiting */

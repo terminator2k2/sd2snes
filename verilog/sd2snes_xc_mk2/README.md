@@ -4,14 +4,17 @@
 `Makefile`, `sd2snes_xc_mk2.xise` (Verilog macros `MK2 | XC_MSU`), `main.ucf`, `config.vh`, `dcm.v` and the Xilinx
 memory blocks in `ip/mk2`. `make mk2` builds `fpga_xc_mk2.bit`; `make mk2s` runs SmartXplorer.
 
-**This core is for testing whether Xeno Crisis fits the mk2 at all (ISE utilisation and timing reports). It is not
-meant to be played yet:**
+**State: it fits and meets timing (soft CPU at 20 MHz), and the mk2 firmware loads it, but the game has no sound
+yet:**
 
-- The mk2 MCU firmware has no Xeno Crisis support yet: no cartridge detection, image loader or FPGA file selection.
-- The mixer, BRR encoder, mixer tick and interrupts were removed on the assumption that the MCU would do the mixing
-  (see `experiments/`). The mixer code on the MCU doesn't exist, so even with a loader the game would have no sound
-  effects and might wait for the mixer.
-- Nothing after the first round of cuts has been simulated: the later steps were only synthesized.
+- The mk2 MCU firmware (`config-mk2`) now detects the cartridge, builds the image like the mk3 firmware (and applies
+  the "MK2P" table), and loads `/sd2snes/fpga_xc_mk2.bit`. The SD card needs the same files as on mk3:
+  `xenocrisis_rp2040.bin` and `xc_soc.bin` (from the same firmware build), plus this core as `fpga_xc_mk2.bit`.
+- The mixer's tick and interrupts and the BRR encoder were removed to make room (see `experiments/`). The mixer
+  (`src/xc_soc/xc_mix.c`) produces the sound effects and sends the music requests to the MSU-1, so without it there
+  is no sound effects and no music, even with an MSU-1 pack. The game itself does not wait for it: in simulation it
+  plays through 3,600 frames without the mixer.
+- The final design ran in RTL-in-the-loop simulation (60 s of play, 20 and 40 MHz, see below), not yet on hardware.
 
 MSU-1 only (the music comes from an MSU-1 pack). The mk3 cores (`../sd2snes_xc`, `../sd2snes_xc_msu`) do not use
 these files and are unchanged.
@@ -46,6 +49,24 @@ Timing of that build (40 MHz soft CPU): the CPU's worst path is 45 ns (fetch-buf
 shifter/ALU, next PC; more than half of it routing), about 22 MHz; CLK2 misses 85.7 MHz by 9.6 ns on ordinary sd2snes
 paths (brightness patch, SD clock, bridge synchronizer), because the full chip forces long routes. The soft CPU now runs
 at 20 MHz.
+
+## Soft CPU at 20 MHz (RTL-in-the-loop)
+
+`xc_top` as in this folder (16 KB write-through cache, no mixer, RAM not cleared), Verilated, with MesenCE running
+the SNES side; 3,600 frames of the test script, every core and DMA access checked against a reference memory:
+
+| | 20 MHz | 40 MHz |
+|---|---|---|
+| game ticks later than one frame | 30 of 3,566 | 25 of 3,571 |
+| frame message → stream post, p50 / p95 / p99 / max | 4.6 / 8.2 / 16.5 / 55.7 ms | 3.3 / 6.1 / 16.5 / 35.3 ms |
+| CPU waiting for the SNES (`$3000` window) | 39.6% | 47.5% |
+| mismatches against the reference memory | 0 | 0 |
+
+Both runs halted after the last frame, while the simulation was shutting down (after its statistics), as in the
+earlier run noted below.
+
+ISE (last build, 20 MHz): 3,582 of 3,584 slices; all constraints met, CLK2 slack +0.032 ns, soft CPU +0.075 ns
+(worst-case conditions). There is no room left: any addition needs slices freed elsewhere.
 
 ## Things to look at in the ISE reports
 

@@ -4,7 +4,8 @@
  * like any other game. load_rom() puts it at PSRAM 0; then xc_load_image() adds, from the SD card:
  *
  *   /sd2snes/xenocrisis_rp2040.bin  the RP2040 flash dump (16 MB, supplied by the user, like the DSP or BS-X files)
- *   /sd2snes/xc_soc.bin             the soft CPU support files, shipped with the firmware next to fpga_xc.bi3:
+ *   /sd2snes/xc_soc.bin             the soft CPU support files, shipped with the firmware next to fpga_xc.bi3
+ *                                   (mk2: fpga_xc_mk2.bit):
  *                                   replacement bootrom and firmware additions (built with the firmware: src/xc_soc/)
  *
  * PSRAM layout (the same as src/xc_soc/xc_build_image.py produces, which remains usable: a file larger than 128 KB is
@@ -17,7 +18,8 @@
  *   0xD24000-0xD27FFF  firmware additions                  (RP2040 flash 0xF00000)
  *
  * Then the firmware functions listed in the additions' patch table are redirected in the PSRAM copy
- * (xc_patch_image.py does the same to a file). Without a .srm, the save area starts from the dump's
+ * (xc_patch_image.py does the same to a file). On the mk2, the "MK2P" table after it is applied as well
+ * (xc_patch_image.py --mk2): the mk2 core has no SIO divider. Without a .srm, the save area starts from the dump's
  * (RP2040 flash 0xFF8000-0xFFFFFF), so the saves made on the cartridge carry over.
  */
 #include <string.h>
@@ -37,6 +39,7 @@
 #define XC_SOC_FILE    "/sd2snes/xc_soc.bin"
 #define XC_SOC_MAGIC   0x434F5358u     /* "XSOC" */
 #define XC_FW_MAGIC    0x5843584Du     /* firmware additions header (xc_fw_header.c) */
+#define XC_MK2P_MAGIC  0x50324B4Du     /* "MK2P": mk2 patch table after the main one */
 #define XC_LAUNCH_CORE1 0x10059060u    /* multicore_launch_core1(): identifies the firmware build */
 
 static uint8_t from_dump;              /* image built here: the dump's save area may seed the save RAM */
@@ -64,6 +67,27 @@ static uint32_t psram_of(uint32_t flash_addr)
 {
   uint32_t a = flash_addr - 0x10000000u;
   return a < 0x20000u ? 0xD00000u + a : a;
+}
+
+/* one patch table entry at file offset off of xc_soc.bin (open): redirect a firmware function in the PSRAM copy */
+static int patch_entry(uint32_t off)
+{
+  uint32_t e[3];                                   /* flash address, target, kind */
+  if(file_readblock(e, off, 12) != 12) return 0;
+  uint32_t addr = e[0];
+  if(e[2] == 0) {
+    /* push {r0}; ldr r0, [pc, #k]; mov ip, r0; pop {r0}; bx ip; nop; .word target */
+    uint32_t lit = (addr + 13) & ~3u;
+    uint16_t code[6] = { 0xB401, 0x4800 | (uint16_t)((lit - ((addr + 6) & ~3u)) / 4), 0x4684, 0xBC01, 0x4760, 0xBF00 };
+    sram_writeblock(code, psram_of(addr), 12);
+    sram_writeblock(&e[1], psram_of(lit), 4);
+  } else if(e[2] == 1) {
+    sram_writeblock(&e[1], psram_of(addr + 12), 4);  /* existing veneer: new target */
+  } else {
+    uint16_t code[2] = { 0x2000, 0x4770 };           /* movs r0, #0; bx lr */
+    sram_writeblock(code, psram_of(addr), 4);
+  }
+  return 1;
 }
 
 /* returns NULL when the image is complete, else the name of the file that is missing or wrong */
@@ -98,23 +122,20 @@ const char* xc_load_image(void)
     return XC_SOC_FILE;
   }
   uint32_t count = h[3];
-  for(uint32_t i = 0; i < count; i++) {
-    uint32_t e[3];                                   /* flash address, target, kind */
-    if(file_readblock(e, 0x4210u + i * 12, 12) != 12) break;
-    uint32_t addr = e[0];
-    if(e[2] == 0) {
-      /* push {r0}; ldr r0, [pc, #k]; mov ip, r0; pop {r0}; bx ip; nop; .word target */
-      uint32_t lit = (addr + 13) & ~3u;
-      uint16_t code[6] = { 0xB401, 0x4800 | (uint16_t)((lit - ((addr + 6) & ~3u)) / 4), 0x4684, 0xBC01, 0x4760, 0xBF00 };
-      sram_writeblock(code, psram_of(addr), 12);
-      sram_writeblock(&e[1], psram_of(lit), 4);
-    } else if(e[2] == 1) {
-      sram_writeblock(&e[1], psram_of(addr + 12), 4);  /* existing veneer: new target */
-    } else {
-      uint16_t code[2] = { 0x2000, 0x4770 };           /* movs r0, #0; bx lr */
-      sram_writeblock(code, psram_of(addr), 4);
-    }
+  for(uint32_t i = 0; i < count; i++)
+    if(!patch_entry(0x4210u + i * 12)) break;
+#ifdef CONFIG_MK2
+  /* the mk2 table after it: the pico-sdk divider functions -> software division (the mk2 core has no divider) */
+  uint32_t t = 0x4210u + count * 12;
+  if(file_readblock(h, t, 8) != 8 || h[0] != XC_MK2P_MAGIC || h[1] > 16) {
+    file_close();
+    printf("XC: xc_soc.bin has no mk2 table\n");
+    return XC_SOC_FILE;
   }
+  for(uint32_t i = 0; i < h[1]; i++)
+    if(!patch_entry(t + 8 + i * 12)) break;
+  count += h[1];
+#endif
   file_close();
   if(file_res) return XC_SOC_FILE;
   printf("XC: image ok, %lu patches\n", count);
