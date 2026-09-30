@@ -1,11 +1,14 @@
 # Size experiments (synthesis only)
 
-These patches shrink the mk2 design further. They were **only synthesized, not simulated or tested**: they show how
-much each step saves, not that the result works.
+These patches record how the first-round mk2 design (`xc_m0.v`/`xc_soc.v` of commit "cut-down soft CPU and SoC")
+was shrunk further, step by step. They were **only synthesized, not simulated or tested**: they show how much each
+step saves, not that the result works. All six are applied in the core in the folder above; the core then got two more
+changes that the patches don't contain: the LRU bits and the bridge buffers in distributed RAM, and a 16 KB cache.
 
 They apply in order, with `patch -p1`, to a flat folder holding the Xeno Crisis sources as the mk2 core would use them:
 
-- `xc_m0.v`, `xc_soc.v` from this folder;
+- `xc_m0.v`, `xc_soc.v` of the first-round mk2 design (`git show <commit>:verilog/sd2snes_xc_mk2/xc_soc.v`, from the
+  commit "NVIC acknowledge wins over a tick");
 - `xc_top.v`, `xc_cache.v`, `xc_bridge.v`, `xc_window.v`, `xc_stream.v`, `xc_brr.v`, `xc_tick.v`, `xc_decbox.v` from
   `../sd2snes_xc`;
 - `xc_msubox.v` from `../sd2snes_xc_msu`.

@@ -38,7 +38,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 module xc_m0 #(
   parameter DEBUG = 1,           // debug read port and cycle/instruction counters (lockstep harness only)
-  parameter EARLY_FETCH = 1      // issue the next fetch in the cycle an instruction finishes (not in step mode)
+  parameter EARLY_FETCH = 0      // issue the next fetch in the cycle an instruction finishes (not in step mode)
 ) (
   input clk,
   input rst,
@@ -148,7 +148,7 @@ reg [5:0] ex_num;
 reg step_armed;                 // step mode: a step was requested and has not finished yet
 wire go = !step_mode || step_go || step_armed;
 wire dbg_now = (state == S_IDLE) && dbg_we;
-wire take_exc = exc_req && (step_mode || (!primask && ipsr == 6'd0));
+wire take_exc = 1'b0;
 wire [31:0] xpsr = {flag_n, flag_z, flag_c, flag_v, 3'b000, 1'b1, 18'd0, ipsr};
 
 function [3:0] first9(input [8:0] l); // lowest set bit, as a register number (bit 8 = LR = 14)
@@ -452,9 +452,7 @@ always @* begin
             default: begin // BX / BLX
               ra = 4'd13;
               if(op[7]) begin w_en = 1'b1; w_idx = 4'd14; w_src = W_PC2L; end
-              if(ipsr != 6'd0 && rdB[31:28] == 4'hF) begin
-                pc_en = 1'b0; done = 1'b0; eret_start = 1'b1;
-              end else if(!rdB[0]) begin
+              if(!rdB[0]) begin
                 pc_en = 1'b0; done = 1'b0; w_en = 1'b0; set_fault = 1'b1; fault_val = 8'h02;
               end else pc_src = PC_RDB;
             end
@@ -648,8 +646,7 @@ always @* begin
       S_POPPC: begin
         ra = 4'd13;
         if(bus_ready) begin
-          if(ipsr != 6'd0 && bus_rdata[31:28] == 4'hF) eret_start = 1'b1;
-          else if(!bus_rdata[0]) begin set_fault = 1'b1; fault_val = 8'h02; end
+          if(!bus_rdata[0]) begin set_fault = 1'b1; fault_val = 8'h02; end
           else begin bus_end = 1'b1; pc_en = 1'b1; pc_src = PC_BUS; done = 1'b1; end
         end
       end

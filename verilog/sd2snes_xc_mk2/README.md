@@ -1,17 +1,52 @@
-# Xeno Crisis on sd2snes mk2: cut-down soft CPU (work in progress)
+# Xeno Crisis on sd2snes mk2 (fit test core)
 
-This folder holds the mk2 (Spartan-3 XC3S400) variants of the two largest parts of the Xeno Crisis core, the soft CPU
-(`xc_m0.v`) and the SoC around it (`xc_soc.v`). They are cut down to what the game actually uses. The mk2 core is
-meant for the MSU-1 version only, so the music comes from an MSU-1 pack and there is no Opus decoding.
+`sd2snes_xc_mk2` is a complete ISE project for the sd2snes mk2 (Spartan-3 XC3S400), laid out like the other mk2 cores:
+`Makefile`, `sd2snes_xc_mk2.xise` (Verilog macros `MK2 | XC_MSU`), `main.ucf`, `config.vh`, `dcm.v` and the Xilinx
+memory blocks in `ip/mk2`. `make mk2` builds `fpga_xc_mk2.bit`; `make mk2s` runs SmartXplorer.
 
-The mk3 cores (`../sd2snes_xc`, `../sd2snes_xc_msu`) do not use these files and are unchanged.
+**This core is for testing whether Xeno Crisis fits the mk2 at all (ISE utilisation and timing reports). It is not
+meant to be played yet:**
 
-**Status:** there is no mk2 FPGA core yet. What is missing is the top level for the Spartan-3 (`main.v`, pin
-constraints, the DCM clocks), the Xilinx memory blocks and the MCU side for the mk2 firmware. These two files are
-checked in simulation (see below). The real open question is size: even cut down, the logic is about twice what the
-mk2 FPGA has room for (see "Size").
+- The mk2 MCU firmware has no Xeno Crisis support yet: no cartridge detection, image loader or FPGA file selection.
+- The mixer, BRR encoder, mixer tick and interrupts were removed on the assumption that the MCU would do the mixing
+  (see `experiments/`). The mixer code on the MCU doesn't exist, so even with a loader the game would have no sound
+  effects and might wait for the mixer.
+- Nothing after the first round of cuts has been simulated: the later steps were only synthesized.
 
-## What is removed, and why that is safe
+MSU-1 only (the music comes from an MSU-1 pack). The mk3 cores (`../sd2snes_xc`, `../sd2snes_xc_msu`) do not use
+these files and are unchanged.
+
+## What is in it
+
+| File | Contents |
+|---|---|
+| `main.v` | the Xeno Crisis `main.v` with its mk2 branch; adds `soc_dcm` for the soft CPU clock |
+| `dcm.v` | `my_dcm` (CLK2 = 24 MHz x 25 / 7 = 85.7 MHz, as in the gsu core) and `soc_dcm` (soft CPU: 24 MHz x 5 / 3 = 40 MHz) |
+| `main.ucf` | the mk2 pinout (as sd2snes_gsu) plus TIG between CLK2 and the soft CPU clock (the paths through `xc_bridge`'s synchronizers) |
+| `xc_m0.v` | soft CPU core: register file in LUT RAM, no ROR/REV16/REVSH, MRS/MSR IPSR/PRIMASK only, no interrupts, no early fetch |
+| `xc_soc.v` | SoC: one 16 KB 2-way write-through cache for code and data, no divider, fixed APB reads, no BRR/tick/NVIC |
+| `xc_cache.v` | cache storage; LRU bits in distributed RAM (no reset: they are only a replacement hint) |
+| `xc_bridge.v` | clock-domain bridge; its two 8 x 32 buffers in distributed RAM |
+| `xc_window.v`, `xc_stream.v` | `$3000` window, descriptor queue 2 entries deep |
+| `xc_top.v` | the blocks together, MSU-1 only, no performance counters |
+| `msu.v`, `xc_dac.v`, `xc_msubox.v` | MSU-1 audio (no data port), resampling DAC (Xilinx `dac_buf` ports), soft CPU → MSU-1 registers |
+| `address.v`, `cheat.v`, `mcu_cmd.v`, `sd_dma.v`, `spi.v` | as in `../sd2snes_xc` |
+
+Block RAM: cache data 8 (one per byte lane and way), cache tags 2, window rings 2, `dac_buf` 1, `snescmd_buf` 1: 14 of 16.
+
+## Things to look at in the ISE reports
+
+- **Utilisation:** slices / LUTs (map report). Yosys estimates it at 7,859 LUTs (6,187 without LUT1 buffers) plus 144
+  RAM16X1D, about 1.2–1.3x the gsu3 (FX3) core measured the same way (see "Size").
+- **Timing:** CLK2 (85.7 MHz) and the soft CPU clock (40 MHz). If the soft CPU misses timing, try 32 MHz: in `dcm.v`
+  set `soc_dcm` to `.CLKFX_MULTIPLY(4)`, and in `main.v` set `.SOC_CLK_NUM(32)`.
+- The XST optimisation settings are the gsu core's (speed). If mapping fails for lack of space, try Optimization Goal
+  = Area in the project properties.
+
+## First round of cuts: what is removed, and why that is safe
+
+The CPU and SoC changes below were checked in simulation. The later size steps (write-through cache, no mixer, and so
+on) are described in `experiments/README.md`; they were only synthesized.
 
 The evidence comes from two sources:
 
@@ -36,7 +71,7 @@ test did not cover shows up instead of misbehaving.
 The extra patch table sits after the main one, so the mk3 firmware and older MesenCE builds don't see it: the
 `xc_soc.bin` built here works unchanged on mk3.
 
-## Checks
+## Checks (first round of cuts only)
 
 - **Software division:** the original divider functions (hardware divider, as MesenCE models it) and the replacements
   were called with 608,000 operand pairs: edge cases (0, ±1, INT_MIN, all ones, division by zero) and random values,
@@ -56,7 +91,7 @@ The extra patch table sits after the main one, so the mk3 firmware and older Mes
   compared), mk2 mode, from save states through the gameplay part of the test script (frames 1,200-3,600, in
   300-frame pieces): 3.13 billion instructions and about 40,000 interrupt entries, 0 mismatches. The first 1,200
   frames (start-up, menus) ran in lockstep without a mismatch too.
-- **Game on the Verilated SoC** (RTL-in-the-loop: `xc_top` with these two files, MSU-1, 4 KB caches, 40.25 MHz), 3,600
+- **Game on the Verilated SoC** (RTL-in-the-loop: `xc_top` with the first-round `xc_m0.v`/`xc_soc.v`, MSU-1, 4 KB caches, 40.25 MHz), 3,600
   frames (with the NVIC change of the last commit: 2,550 frames, then the simulation was stopped): no halt, and every core and DMA access checked against the reference memory (354 million reads, 38 million
   writes, 3.4 MB of DMA) without a mismatch. Compared with the mk3 SoC (16 KB caches), the CPU is busy for longer
   (instruction-fetch stalls 11% of the cycles instead of 2%), but it still spends a third of its time waiting for the
@@ -67,20 +102,17 @@ The extra patch table sits after the main one, so the mk3 firmware and older Mes
 
 ## Size
 
-Yosys, Spartan-3 (the numbers overcount compared with XST; the comparison is what matters). All the Xeno Crisis logic,
-MSU-1, 2 KB caches:
+Yosys `synth_xilinx -family xc3s -flatten`, whole design (Yosys counts more than XST; the comparison is what matters):
 
-| | LUTs | of which LUT1 | Flip-flops |
-|---|---|---|---|
-| mk3 design | 11,165 | 1,869 | 4,001 |
-| this folder | 8,005 | 1,015 | 3,109 |
-| SuperFX (GSU), which fits on the mk2 only just | 3,623 | 271 | 1,424 |
-| whole XC3S400 | 7,168 | | 7,168 |
+| Design | LUTs | without LUT1 | RAM16X1D | Flip-flops | Block RAM |
+|---|---|---|---|---|---|
+| this core | 7,859 | 6,187 | 144 | 2,868 | 12 + 2 IP |
+| gsu3 (FX3) core, ludufre fork: fits the XC3S400 | 5,488 | 5,096 | 0 | 2,640 | |
+| classic gsu core, same fork: fits (with SmartXplorer) | 5,987 | 5,611 | 0 | 3,213 | |
+| XC3S400 | 7,168 LUTs (3,584 slices) | | | 7,168 | 16 |
 
-What is left is needed: the CPU core (~3,200), the cache and memory controller (~2,500), the BRR encoder (~800), the
-`$3000` window (~800) and the clock-domain bridge (~500).
+A RAM16X1D takes two LUT sites. Counting those and leaving out the LUT1 buffers, this core needs about 6,500 LUT sites
+against 5,100–5,600 for the gsu cores. Only an ISE build can say whether it fits.
 
-Block RAM is less of a problem than it looks. The XC3S400 has 16 block RAMs of 2 KB each (2,048 × 8 bits plus parity, or 512 × 32), with no
-byte write enables. Without the unused MSU-1 data buffer (8 block RAMs), 14 are free after `dac_buf` and `snescmd_buf`.
-A D-cache needs one block RAM per byte lane and way, so 8 of them hold up to 16 KB; a 4 KB I-cache needs 2 (32 bits
-wide, no byte writes), plus tags. The caches can therefore stay large.
+History of the Xeno Crisis logic (`xc_top` alone, 2 KB caches): mk3 design 11,165 LUTs → first round of cuts 7,900 →
+size steps 5,765 (see `experiments/`).

@@ -204,7 +204,8 @@ endfunction
 
 wire [3:0] cls = classify(bus_addr);
 wire [25:0] key_cur = cache_key(bus_addr);
-wire use_ic = bus_fetch && (cls == C_BOOT || cls == C_FLASH);
+wire [24:0] cur_phys = key_phys(key_cur);
+wire use_ic = 1'b0;   // mk2: instruction fetches use the (only) cache
 wire use_dc = !use_ic && (cls == C_BOOT || cls == C_FLASH || cls == C_RAM);
 
 // byte lanes
@@ -262,13 +263,7 @@ xc_cache #(.SETS(1 << DIDX), .IDXW(DIDX), .TAGW(DTAG)) dcache (
   .lru_set(key_cur[DIDX+4:5]), .lru_way(d_lru_way), .touch(d_touch), .touch_set(d_touch_set), .touch_way(d_touch_way),
   .inv_all_lru(lru_reset)
 );
-xc_cache #(.SETS(1 << IIDX), .IDXW(IIDX), .TAGW(ITAG)) icache (
-  .clk(clk), .rd_word(rd_key[IIDX+4:2]), .q0(iq0), .q1(iq1), .t0(it0), .t1(it1),
-  .dwe(i_dwe), .dway(i_dway), .dword(i_dword), .dbe(4'b1111), .dwdata(i_dwdata),
-  .twe(i_twe), .tway(i_tway), .tset(i_tset), .twdata(i_twdata),
-  .lru_set(key_cur[IIDX+4:5]), .lru_way(i_lru_way), .touch(i_touch), .touch_set(i_touch_set), .touch_way(i_touch_way),
-  .inv_all_lru(lru_reset)
-);
+assign iq0 = 32'd0; assign iq1 = 32'd0; assign it0 = 0; assign it1 = 0; assign i_lru_way = 1'b0;   // mk2: one cache for code and data
 
 // the read outputs belong to rd_key_q; they are stale if a write to the same cache happened at that edge
 reg [25:0] rd_key_q;
@@ -310,8 +305,7 @@ wire brr_sel = idle_req & (cls == C_BRR);
 wire tick_sel = idle_req & (cls == C_TICK) & bus_we & (bus_addr[11:0] < 12'h010);
 wire [31:0] brr_rdata, tick_rdata;
 wire brr_busy, tick_irq;
-xc_brr brr (.clk(clk), .rst(rst), .sel(brr_sel), .we(bus_we), .addr(bus_addr[6:2]), .wdata(bus_wdata), .rdata(brr_rdata), .busy(brr_busy));
-xc_tick #(.CLK_NUM(CLK_NUM), .CLK_DEN(CLK_DEN)) tick (.clk(clk), .rst(rst), .sel(tick_sel), .we(bus_we), .addr(bus_addr[3:2]), .wdata(bus_wdata), .rdata(tick_rdata), .irq(tick_irq));
+assign brr_rdata = 32'd0; assign brr_busy = 1'b0; assign tick_rdata = 32'd0; assign tick_irq = 1'b0;   // mk2: mixer and BRR on the MCU
 
 reg [31:0] spinlocks;
 reg nvic_en, nvic_pend;             // IRQ 26 (mixer tick) only
@@ -328,7 +322,7 @@ function [1:0] apb_alias2(input [1:0] old, input [1:0] v, input [1:0] mode);
 endfunction
 
 // interrupts: IRQ 26 only (dec_irq_tog is not used: the MSU-1 core has no decode interrupt)
-assign exc_req = nvic_pend & nvic_en & running & ~halted;
+assign exc_req = 1'b0;   // mk2: no interrupts (the mixer runs on the MCU)
 assign exc_num = 6'd42;                        // 16 + 26
 
 //------------------------------------------------------------------------------
@@ -391,7 +385,7 @@ always @* begin
       fast_ready = i_hit;
       fast_rdata = i_word;
     end else if(use_dc) begin
-      if(bus_we) fast_ready = d_hit | (d_look & (cls != C_RAM));   // writes to flash/bootrom are ignored
+      if(bus_we) fast_ready = d_look & ((cls != C_RAM) | ~bg_busy);  // mk2 write-through: RAM stores are posted to the SRAM
       else fast_ready = d_hit;
       fast_rdata = lane_out(d_word, bus_addr[1:0], bus_size);
     end else begin
@@ -537,8 +531,12 @@ always @(posedge clk) begin
               i_touch <= 1'b1; i_touch_set <= key_cur[IIDX+4:5]; i_touch_way <= i_hit1;
             end else if(use_dc) begin
               if(bus_we && cls == C_RAM) begin
-                d_dwe <= 1'b1; d_dway <= d_hit1; d_dword <= key_cur[DIDX+4:2]; d_dbe <= be; d_dwdata <= wd_lanes;
-                d_twe <= 1'b1; d_tway <= d_hit1; d_tset <= key_cur[DIDX+4:5]; d_twdata <= {1'b1, 1'b1, key_cur[25:DIDX+5]};
+                // write-through, no allocate: update the line if it is cached, and always write the SRAM
+                if(d_hit) begin d_dwe <= 1'b1; d_dway <= d_hit1; d_dword <= key_cur[DIDX+4:2]; d_dbe <= be; d_dwdata <= wd_lanes; end
+                op_kind <= OP_SRAM_WR; op_addr <= cur_phys[23:0];
+                op_len <= (bus_size == 2'd0) ? 6'd1 : (bus_size == 2'd1) ? 6'd2 : 6'd4;
+                wb_we <= 1'b1; wb_addr <= 3'd0; wb_data <= bus_wdata;
+                op_start <= 1'b1; bg_busy <= 1'b1;
               end
               if(d_hit) begin d_touch <= 1'b1; d_touch_set <= key_cur[DIDX+4:5]; d_touch_way <= d_hit1; end
             end else begin
@@ -587,7 +585,7 @@ always @(posedge clk) begin
               // miss: pick the victim, write it back if dirty, then fill
               m_icache <= 1'b0; m_key <= {key_cur[25:5], 5'd0};
               m_way <= !dt0[DTAG+1] ? 1'b0 : !dt1[DTAG+1] ? 1'b1 : d_lru_way;
-              st <= S_MISS;
+              st <= S_FILL;                 // lines are never dirty: no write-back
             end
           end else begin
             case(cls)
@@ -608,13 +606,11 @@ always @(posedge clk) begin
               end
               C_WIN: begin
                 if(bus_we && bus_addr[11:0] == 12'h004 && bus_wdata != 32'd0) begin
-                  // clean the D$ for the range the DMA will read, then post
+                  // post the descriptor (TX_ADDR, then TX_LEN); the SRAM is always up to date (write-through)
                   post_len <= bus_wdata;
-                  cl_key <= cache_key(win_txaddr) & ~26'h1F;
-                  cl_end <= cache_key(win_txaddr + bus_wdata - 32'd1);
-                  cl_all <= (bus_wdata > 32'd4096) || (win_txaddr[31:28] != 4'h2);
-                  cl_set <= {DIDX{1'b0}};
-                  st <= S_CLEAN;
+                  op_kind <= OP_WIN_WR; op_addr <= 24'h000000; op_len <= 6'd4; op_start <= 1'b1;
+                  wb_we <= 1'b1; wb_addr <= 3'd0; wb_data <= win_txaddr;
+                  st <= S_POST;
                 end else begin
                   op_kind <= bus_we ? OP_WIN_WR : OP_WIN_RD; op_addr <= {12'd0, bus_addr[11:0]}; op_len <= 6'd4;
                   wb_we <= 1'b1; wb_addr <= 3'd0; wb_data <= bus_wdata; op_start <= 1'b1; rbi <= 3'd0; unc_mode <= bus_we ? 3'd4 : 3'd0;
@@ -631,39 +627,6 @@ always @(posedge clk) begin
           end
         end
       end
-
-      //------------------------------------------------------------ D$ miss: write back the victim
-      S_MISS: begin
-        if((m_way ? dt1[DTAG+1] & dt1[DTAG] : dt0[DTAG+1] & dt0[DTAG])) begin
-          wb_set <= m_key[DIDX+4:5]; wb_way <= m_way; wb_tag <= m_way ? dt1[DTAG-1:0] : dt0[DTAG-1:0];
-          wb_ret <= S_FILL;
-          wb_i <= 4'd0;
-          ctl_rd <= 1'b1; ctl_key <= {m_way ? dt1[DTAG-1:0] : dt0[DTAG-1:0], m_key[DIDX+4:5], 5'd0};
-          st <= S_WB_RD;
-        end else st <= S_FILL;
-      end
-      // read the 8 words of line {wb_tag, wb_set} (one cycle latency) into 'line', then write it to SRAM
-      S_WB_RD: begin
-        ctl_rd <= 1'b1;
-        ctl_key <= {wb_tag, wb_set, 3'd0, 2'd0} + {21'd0, wb_i[2:0] + 3'd1, 2'b00};
-        if(wb_i != 4'd0) begin wb_we <= 1'b1; wb_addr <= wb_i[2:0] - 3'd1; wb_data <= wb_way ? dq1 : dq0; end
-        wb_i <= wb_i + 4'd1;
-        if(wb_i == 4'd8) begin
-          ctl_rd <= 1'b0;
-          // clear the dirty bit now; the line stays valid
-          d_twe <= 1'b1; d_tway <= wb_way; d_tset <= wb_set; d_twdata <= {1'b1, 1'b0, wb_tag};
-          if(wb_ret == S_FILL) begin
-            // miss: fill first, write the victim afterwards (the last data word is written on this edge)
-            bg_pend <= 1'b1; bg_addr <= wb_phys[23:0];
-            st <= S_FILL;
-          end else begin
-            op_kind <= OP_SRAM_WR; op_addr <= wb_phys[23:0]; op_len <= 6'd32;
-            op_start <= 1'b1;           // the last data word is written on the same edge
-            st <= S_WB_OP;
-          end
-        end
-      end
-      S_WB_OP: if(op_done) st <= wb_ret;
 
       //------------------------------------------------------------ fill
       S_FILL: begin
@@ -689,11 +652,6 @@ always @(posedge clk) begin
           if(cnt == 9'd9) begin
             if(m_icache) begin i_twe <= 1'b1; i_tway <= m_way; i_tset <= m_key[IIDX+4:5]; i_twdata <= {1'b1, 1'b0, m_key[25:IIDX+5]}; end
             else begin d_twe <= 1'b1; d_tway <= m_way; d_tset <= m_key[DIDX+4:5]; d_twdata <= {1'b1, 1'b0, m_key[25:DIDX+5]}; end
-            if(bg_pend) begin
-              // the fill is complete: now write the victim from the bridge's write buffer
-              op_kind <= OP_SRAM_WR; op_addr <= bg_addr; op_len <= 6'd32; op_start <= 1'b1;
-              bg_pend <= 1'b0; bg_busy <= 1'b1;
-            end
             st <= S_RETRY;
           end
         end
@@ -712,41 +670,6 @@ always @(posedge clk) begin
         st <= S_SEL;
       end
       S_SEL: st <= S_IDLE;          // the core has taken the data; one cycle before the next request
-
-      //------------------------------------------------------------ clean before a window post
-      S_CLEAN: begin
-        // read the tags of the next line (or set) to check
-        ctl_rd <= 1'b1;
-        ctl_key <= cl_all ? {{DTAG{1'b0}}, cl_set, 5'd0} : cl_key;
-        st <= S_CLEAN_WAIT;
-      end
-      S_CLEAN_WAIT: st <= S_CLEAN_CHK;   // the cache reads ctl_key at the end of this cycle
-      S_CLEAN_CHK: begin
-        // tags for ctl_key are valid now
-        ctl_rd <= 1'b1;
-        if(cl_all ? (dt0[DTAG+1] & dt0[DTAG]) : (dt0[DTAG+1] & dt0[DTAG] & dt0[DTAG-1:0] == cl_key[25:DIDX+5])) begin
-          wb_set <= cl_all ? cl_set : cl_key[DIDX+4:5]; wb_way <= 1'b0; wb_tag <= dt0[DTAG-1:0]; wb_i <= 4'd0; wb_ret <= S_CLEAN;
-          ctl_key <= {dt0[DTAG-1:0], cl_all ? cl_set : cl_key[DIDX+4:5], 5'd0};
-          st <= S_WB_RD;
-        end else if(cl_all ? (dt1[DTAG+1] & dt1[DTAG]) : (dt1[DTAG+1] & dt1[DTAG] & dt1[DTAG-1:0] == cl_key[25:DIDX+5])) begin
-          wb_set <= cl_all ? cl_set : cl_key[DIDX+4:5]; wb_way <= 1'b1; wb_tag <= dt1[DTAG-1:0]; wb_i <= 4'd0; wb_ret <= S_CLEAN;
-          ctl_key <= {dt1[DTAG-1:0], cl_all ? cl_set : cl_key[DIDX+4:5], 5'd0};
-          st <= S_WB_RD;
-        end else st <= S_CLEAN_NEXT;
-      end
-      S_CLEAN_NEXT: begin
-        ctl_rd <= 1'b0;
-        if(cl_all ? (cl_set == {DIDX{1'b1}}) : (cl_key[25:5] >= cl_end[25:5])) begin
-          // clean done: post the descriptor (TX_ADDR, then TX_LEN)
-          op_kind <= OP_WIN_WR; op_addr <= 24'h000000; op_len <= 6'd4; op_start <= 1'b1;
-          wb_we <= 1'b1; wb_addr <= 3'd0; wb_data <= win_txaddr;
-          st <= S_POST;
-        end else begin
-          if(cl_all) cl_set <= cl_set + 1'b1;
-          else cl_key <= cl_key + 26'd32;
-          st <= S_CLEAN;
-        end
-      end
 
       S_POST: if(op_done) begin
         op_kind <= OP_WIN_WR; op_addr <= 24'h000004; op_len <= 6'd4; op_start <= 1'b1;
