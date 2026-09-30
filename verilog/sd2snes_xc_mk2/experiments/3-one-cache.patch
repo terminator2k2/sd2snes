@@ -1,0 +1,27 @@
+diff -ruN e2/xc_soc.v e3/xc_soc.v
+--- a/xc_soc.v	2026-10-01 00:04:58.807012483 +0800
++++ b/xc_soc.v	2026-10-01 00:05:49.835919246 +0800
+@@ -204,7 +204,7 @@
+ 
+ wire [3:0] cls = classify(bus_addr);
+ wire [25:0] key_cur = cache_key(bus_addr);
+-wire use_ic = bus_fetch && (cls == C_BOOT || cls == C_FLASH);
++wire use_ic = 1'b0;   // mk2: instruction fetches use the (only) cache
+ wire use_dc = !use_ic && (cls == C_BOOT || cls == C_FLASH || cls == C_RAM);
+ 
+ // byte lanes
+@@ -262,13 +262,7 @@
+   .lru_set(key_cur[DIDX+4:5]), .lru_way(d_lru_way), .touch(d_touch), .touch_set(d_touch_set), .touch_way(d_touch_way),
+   .inv_all_lru(lru_reset)
+ );
+-xc_cache #(.SETS(1 << IIDX), .IDXW(IIDX), .TAGW(ITAG)) icache (
+-  .clk(clk), .rd_word(rd_key[IIDX+4:2]), .q0(iq0), .q1(iq1), .t0(it0), .t1(it1),
+-  .dwe(i_dwe), .dway(i_dway), .dword(i_dword), .dbe(4'b1111), .dwdata(i_dwdata),
+-  .twe(i_twe), .tway(i_tway), .tset(i_tset), .twdata(i_twdata),
+-  .lru_set(key_cur[IIDX+4:5]), .lru_way(i_lru_way), .touch(i_touch), .touch_set(i_touch_set), .touch_way(i_touch_way),
+-  .inv_all_lru(lru_reset)
+-);
++assign iq0 = 32'd0; assign iq1 = 32'd0; assign it0 = 0; assign it1 = 0; assign i_lru_way = 1'b0;   // mk2: one cache for code and data
+ 
+ // the read outputs belong to rd_key_q; they are stale if a write to the same cache happened at that edge
+ reg [25:0] rd_key_q;
