@@ -14,6 +14,10 @@
 //     2 = CONSTANT  Soul Blade
 //     3 = ALU       Tekken 2, Street Fighter EX Plus Alpha
 //     4 = PORT6     A Bug's Life, Bananas de Pijamas ("port 6xxx", nocash 2017)
+//     5 = BITSWAP40 Marvel Super Heroes vs Street Fighter: the standard bitswap
+//                   latch wired to other address lines (nocash 2017)
+//     6 = KOF98     King of Fighters '98: standard BITSWAP plus a ROM bank switch
+//                   (Revenant/nocash, nesdev t=15510, 2017)
 //
 //   BITSWAP:  banks with A23=1, A18..A16=000 (80,88,90..F8 -- MAME mask 0x780000),
 //             ROM area only (A15=1, or any offset in C0-FF).  fullsnes names the
@@ -39,6 +43,25 @@
 //             non-zero (else 0), 63=4, 65=F, 67=0, 6F=3, anything else 0.
 //             Verified in emulation (LakeSnes + this model) for both games.
 //
+//   BITSWAP40: same latch and read-back bit order as BITSWAP, decoded at
+//             40-4F:8000-FFFF.  The game writes at A1=1 and reads at A1=0
+//             (40:8182/8180, 46:84E2/84E0, 4E:9062/9060 ...), always as a
+//             write immediately followed by the read 2 bytes lower; it never
+//             reads ROM data in 40-7D.  Whether the chip decodes A1 or the /RD
+//             /WR strobes can't be told from the game, so the core uses the
+//             strobes (write -> latch, read -> swapped latch), which satisfies
+//             both readings.  C0-CF is left alone (never accessed).
+//
+//   KOF98:    BITSWAP exactly as variant 1, plus a 4-bit bank register written
+//             at C0-CF:8000-FFFF (the game only uses C0:8788, values 82/00).
+//             While bit 7 is set, ROM accesses see SNES A19..A16 replaced by
+//             the register's low nibble (a 74LS157 on the cart muxes those
+//             lines; nocash's model).  The game copies a routine to WRAM $0700,
+//             writes 82, calls 00:9767/00:9815 (= ROM bank 02) and writes 00.
+//             Emulation: 14434 switches in 8000 frames, every switched read in
+//             bank 00, no NMI/IRQ while switched.  The remap itself is applied
+//             in main.v on the address fed to address.v (ROM accesses only).
+//
 //   Everything is gated by ~IS_PATCH so the in-game menu / savestate hooks that
 //   own $F0-$FF (map_unlock etc.) keep working.
 //////////////////////////////////////////////////////////////////////////////////
@@ -55,20 +78,27 @@ module bootleg(
 
   output        rd_hit,         // drive data_out on this read
   output [7:0]  data_out,
-  output        open_bus        // leave the SNES data bus undriven
+  output        open_bus,       // leave the SNES data bus undriven
+
+  output        rom_bank_en,    // KOF98: remap ROM A19..A16 ...
+  output [3:0]  rom_bank        //        ... to this value
 );
 
 localparam [2:0] V_NONE     = 3'd0,
                  V_BITSWAP  = 3'd1,
                  V_CONSTANT = 3'd2,
                  V_ALU      = 3'd3,
-                 V_PORT6    = 3'd4;
+                 V_PORT6    = 3'd4,
+                 V_BS40     = 3'd5,
+                 V_KOF98    = 3'd6;
 
 // registered decode of the variant (static while a game runs)
-reg v_bitswap, v_constant, v_alu, v_port6;
+reg v_bitswap, v_constant, v_alu, v_port6, v_bs40, v_kof98;
 always @(posedge clk) begin
   v_port6    <= (variant == V_PORT6);
-  v_bitswap  <= (variant == V_BITSWAP);
+  v_bs40     <= (variant == V_BS40);
+  v_kof98    <= (variant == V_KOF98);
+  v_bitswap  <= (variant == V_BITSWAP) | (variant == V_KOF98);
   v_constant <= (variant == V_CONSTANT);
   v_alu      <= (variant == V_ALU);
 end
@@ -78,12 +108,19 @@ wire a22 = snes_addr[22];
 wire a15 = snes_addr[15];
 
 // ---------------------------------------------------------------- BITSWAP
-wire bs_win = v_bitswap & ~is_patch & a23 & (snes_addr[18:16] == 3'b000) & (a22 | a15);
+// KOF98: the bank-switch register (C0-CF:8000-FFFF, see below) is a separate latch
+// (nocash: an 82 in the bitswap latch would upset it), so that window is carved out.
+wire kb_addr = a23 & a22 & (snes_addr[21:20] == 2'b00) & a15;
+wire bs_win = v_bitswap & ~is_patch & a23 & (snes_addr[18:16] == 3'b000) & (a22 | a15)
+              & ~(v_kof98 & kb_addr);
+// BITSWAP40 (Marvel): same latch, banks 40-4F:8000-FFFF
+wire bs40_win = v_bs40 & ~is_patch & ~a23 & a22 & (snes_addr[21:20] == 2'b00) & a15;
+wire bsl_win = bs_win | bs40_win;
 
 reg [7:0] bs_latch;
 always @(posedge clk) begin
   if(reset)                  bs_latch <= 8'h00;
-  else if(bs_win & wr_strobe) bs_latch <= snes_data_in;
+  else if(bsl_win & wr_strobe) bs_latch <= snes_data_in;
 end
 wire [7:0] bs_dout = {bs_latch[0], bs_latch[6], bs_latch[7], bs_latch[1],
                       bs_latch[2], bs_latch[3], bs_latch[4], bs_latch[5]};
@@ -151,9 +188,19 @@ always @* begin
   endcase
 end
 
+// ---------------------------------------------------------------- KOF98 bank switch
+wire kb_win = v_kof98 & ~is_patch & kb_addr;  // C0-CF:8000-FFFF
+reg [7:0] kb_reg;
+always @(posedge clk) begin
+  if(reset)                  kb_reg <= 8'h00;
+  else if(kb_win & wr_strobe) kb_reg <= snes_data_in;
+end
+assign rom_bank_en = v_kof98 & kb_reg[7];
+assign rom_bank    = kb_reg[3:0];
+
 // ---------------------------------------------------------------- outputs
-assign rd_hit   = bs_win | cs_win | al_port | p6_win;
-assign data_out = bs_win ? bs_dout
+assign rd_hit   = bsl_win | cs_win | al_port | p6_win;
+assign data_out = bsl_win ? bs_dout
                 : cs_win ? cs_dout
                 : p6_win ? p6_dout
                 : al_dout;

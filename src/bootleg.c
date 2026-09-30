@@ -57,6 +57,7 @@ static const bootleg_entry_t bootleg_tbl[] = {
   { 0xF863C642, 0x435AE4AD, 0x200000, BOOTLEG_BITSWAP  },  /* Pokemon Stadium (uses the 90/98 mirrors) */
   { 0x5E4ADA04, 0xEE4A038D, 0x200000, BOOTLEG_BITSWAP  },  /* Soul Edge Vs Samurai */
   { 0x40242231, 0xFA8C7F16, 0x200000, BOOTLEG_BITSWAP  },  /* X-Men vs. Street Fighter */
+  { 0xBAD1D9B8, 0x3BD84207, 0x200000, BOOTLEG_BITSWAP  },  /* Squirrel (verified in emulation) */
   /* Soul Blade constant pattern */
   { 0xC97D1D7B, 0x100B21AC, 0x300000, BOOTLEG_CONSTANT },
   /* Tekken 2 ALU/flipflop -- SF EX Plus Alpha uses it too (nocash, nesdev t=15510),
@@ -66,6 +67,10 @@ static const bootleg_entry_t bootleg_tbl[] = {
   /* "port 6xxx" (nocash, nesdev t=15510); the bitswap code in these is dead */
   { 0x014F0FCF, 0xAE463A96, 0x200000, BOOTLEG_PORT6    },  /* A Bug's Life (verified in emulation) */
   { 0x52B0D84B, 0xE425A3C9, 0x100000, BOOTLEG_PORT6    },  /* Bananas de Pijamas (verified in emulation) */
+  /* bitswap latch on other address lines: write 4x:xxx2, read 4x:xxx0 (nocash, nesdev t=15510) */
+  { 0xCDB590E4, 0x8D538965, 0x200000, BOOTLEG_BITSWAP40 },  /* Marvel Super Heroes vs SF (verified in emulation) */
+  /* bitswap + bank switch: C0:8788 = 82 maps ROM bank 02 over bank 00 (Revenant/nocash, nesdev t=15510) */
+  { 0x6C303FC9, 0x29CE930D, 0x200000, BOOTLEG_KOF98    },  /* King of Fighters '98 (verified in emulation) */
 };
 #define BOOTLEG_TBL_N (sizeof(bootleg_tbl) / sizeof(bootleg_tbl[0]))
 

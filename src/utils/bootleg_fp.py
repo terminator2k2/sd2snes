@@ -27,6 +27,9 @@ KNOWN = {
     0x5E4ADA04: ("BOOTLEG_BITSWAP ", "Soul Edge Vs Samurai"),
     0xDAD59B9F: ("BOOTLEG_ALU     ", "Street Fighter EX Plus Alpha"),
     0x40242231: ("BOOTLEG_BITSWAP ", "X-Men vs. Street Fighter"),
+    0xBAD1D9B8: ("BOOTLEG_BITSWAP ", "Squirrel"),
+    0xCDB590E4: ("BOOTLEG_BITSWAP40", "Marvel Super Heroes vs Street Fighter"),
+    0x6C303FC9: ("BOOTLEG_KOF98   ", "King of Fighters '98"),
     0xC97D1D7B: ("BOOTLEG_CONSTANT", "Soul Blade"),
     0x066687CA: ("BOOTLEG_ALU     ", "Tekken 2"),
 }
