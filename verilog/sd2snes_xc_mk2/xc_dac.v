@@ -128,6 +128,7 @@ always @(posedge clkin) begin
   if(lrck_rising) dac_address_r_sync <= dac_address_r;
 end
 
+`ifdef XC_DAC_LINEAR
 // linear interpolation, both channels, two register stages
 reg signed [16:0] d_hi, d_lo;
 reg signed [15:0] p_hi, p_lo;
@@ -144,6 +145,16 @@ always @(posedge clkin) begin
   i_hi <= p_hi + m_hi[19:4];   // |prev + (cur - prev) * s/16| stays within 16 bits
   i_lo <= p_lo + m_lo[19:4];
 end
+
+`else
+// mk2 (size): no interpolation, each input sample is held until the next one (define XC_DAC_LINEAR for linear
+// interpolation, about 100 LUTs and 70 flip-flops more)
+reg signed [15:0] i_hi, i_lo;
+always @(posedge clkin) begin
+  i_hi <= s_cur[31:16];
+  i_lo <= s_cur[15:0];
+end
+`endif
 
 // volume (as dac.v)
 wire [9:0] vol_orig = volume + volume[7];

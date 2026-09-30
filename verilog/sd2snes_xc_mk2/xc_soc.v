@@ -67,7 +67,7 @@ module xc_soc #(
   output reg running,              // core released from reset
   output reg halted,               // core fault, bus fault or firmware panic
   output reg [31:0] halt_code,     // core fault code / panic value / 0xBAD0000x bus fault
-  output reg [31:0] halt_addr,
+  output [31:0] halt_addr,         // mk2: not captured (reads 0)
   output reg dbg_char_valid,       // debug port (0x50802010)
   output reg [7:0] dbg_char,
 
@@ -91,6 +91,7 @@ module xc_soc #(
   output [31:0] mon_rdata,
   output [7:0] core_fault_code_o
 );
+assign halt_addr = 32'd0;
 
 localparam [2:0] OP_PSRAM_RD = 3'd0, OP_SRAM_RD = 3'd1, OP_SRAM_WR = 3'd2,
                  OP_WIN_RD = 3'd3, OP_WIN_WR = 3'd4, OP_DEC_RD = 3'd5, OP_DEC_WR = 3'd6;
@@ -191,10 +192,10 @@ function [24:0] key_phys(input [25:0] k);
   begin
     o = k[23:0];
     case(k[25:24])
-      2'd0: key_phys = {1'b0, 24'hD20000 + {10'd0, o[13:0]}};
+      2'd0: key_phys = {1'b0, 8'hD2, 2'b00, o[13:0]};                        // 0xD20000 + o (no adder: mk2)
       2'd1: begin
-        if(o[23:17] == 7'd0) key_phys = {1'b0, 24'hD00000 + o};
-        else if(o[23:14] == 10'h3C0) key_phys = {1'b0, 24'hD24000 + {10'd0, o[13:0]}};
+        if(o[23:17] == 7'd0) key_phys = {1'b0, 7'b1101000, o[16:0]};         // 0xD00000 + o
+        else if(o[23:14] == 10'h3C0) key_phys = {1'b0, 10'b1101001001, o[13:0]}; // 0xD24000 + o
         else key_phys = {1'b0, o};
       end
       default: key_phys = {1'b1, 24'h008000 + o};
@@ -289,13 +290,13 @@ wire [31:0] i_word = i_hit1 ? iq1 : iq0;
 // Local peripherals
 //------------------------------------------------------------------------------
 // timer: 64-bit microseconds
-reg [63:0] time_us;
+reg [39:0] time_us;                 // mk2: 40 bits (wraps after 12.7 days), read as a 64-bit counter
 reg [15:0] us_div;                  // phase accumulator: + CLK_DEN per clock, one microsecond per CLK_NUM
 always @(posedge clk) begin
   if(rst) begin
-    time_us <= 64'd0; us_div <= 16'd0;
+    time_us <= 40'd0; us_div <= 16'd0;
   end else if(us_div + CLK_DEN >= CLK_NUM) begin
-    us_div <= us_div + CLK_DEN - CLK_NUM; time_us <= time_us + 64'd1;
+    us_div <= us_div + CLK_DEN - CLK_NUM; time_us <= time_us + 40'd1;
   end else us_div <= us_div + CLK_DEN;
 end
 
@@ -335,7 +336,6 @@ localparam [4:0] S_INIT_TAGS = 5'd0, S_INIT_CLR = 5'd1, S_INIT_CLRW = 5'd2, S_IN
 
 reg [4:0] st, wb_ret;
 reg [9:0] cnt;
-reg [23:0] clr_addr;
 
 // miss / write-back bookkeeping
 reg m_icache;                       // miss is in the I$
@@ -408,7 +408,7 @@ always @* begin
         C_TIMER: begin
           fast_ready = 1'b1;
           case(bus_addr[7:0])
-            8'h08, 8'h24: fast_rdata = time_us[63:32];   // TIMEHR (no latch), TIMERAWH
+            8'h08, 8'h24: fast_rdata = {24'd0, time_us[39:32]};   // TIMEHR (no latch), TIMERAWH
             8'h0C, 8'h28: fast_rdata = time_us[31:0];    // TIMELR, TIMERAWL
             default: fast_rdata = 32'd0;         // ARMED, INTR, ...: no alarms in use
           endcase
@@ -463,7 +463,7 @@ always @(posedge clk) begin
     running <= 1'b0;
     halted <= 1'b0;
     halt_code <= 32'd0;
-    halt_addr <= 32'd0;
+   
     ctl_rd <= 1'b0;
     vtor <= 32'h10000100;
     spinlocks <= 32'd0;
@@ -478,7 +478,7 @@ always @(posedge clk) begin
     if(tick_irq) nvic_pend <= 1'b1;
     if(exc_ack) nvic_pend <= 1'b0;             // as the mk3 SoC: the acknowledge wins over a tick in the same cycle
     if(core_fault && !halted) begin
-      halted <= 1'b1; halt_code <= {24'h0FA017, core_fault_code}; halt_addr <= bus_addr;
+      halted <= 1'b1; halt_code <= {24'h0FA017, core_fault_code};
     end
 
     case(st)
@@ -490,15 +490,7 @@ always @(posedge clk) begin
         rbi <= 3'd0;
         i_twe <= 1'b1; i_tway <= cnt[0]; i_tset <= cnt[IIDX:1]; i_twdata <= 0;
         cnt <= cnt + 9'd1;
-        if(cnt == (10'd2 << MIDX) - 10'd1) begin st <= S_INIT_CLR; clr_addr <= 24'h008000; end
-      end
-      S_INIT_CLR: begin
-        op_kind <= OP_SRAM_WR; op_addr <= clr_addr; op_len <= 6'd32; op_start <= 1'b1;
-        st <= S_INIT_CLRW;
-      end
-      S_INIT_CLRW: if(op_done) begin
-        clr_addr <= clr_addr + 24'd32;
-        st <= (clr_addr + 24'd32 >= 24'h04E000) ? S_INIT_VEC : S_INIT_CLR;
+        if(cnt == (10'd2 << MIDX) - 10'd1) st <= S_INIT_VEC;   // mk2: no RAM clear (the RP2040's RAM isn't cleared either)
       end
       S_INIT_VEC: begin
         op_kind <= OP_PSRAM_RD; op_addr <= vec_phys[23:0]; op_len <= 6'd8; op_start <= 1'b1;
@@ -543,12 +535,12 @@ always @(posedge clk) begin
               case(cls)
                 C_TIMER: begin
                   if(bus_we && bus_addr[7:0] >= 8'h10 && bus_addr[7:0] <= 8'h1C) begin
-                    halted <= 1'b1; halt_code <= 32'hBAD00003; halt_addr <= bus_addr;   // timer alarms: unsupported
+                    halted <= 1'b1; halt_code <= 32'hBAD00003;   // timer alarms: unsupported
                   end
                 end
                 C_TICK: begin
                   if(bus_we && bus_addr[11:0] == 12'h010) begin dbg_char_valid <= 1'b1; dbg_char <= bus_wdata[7:0]; end
-                  if(bus_we && bus_addr[11:0] == 12'h014) begin halted <= 1'b1; halt_code <= bus_wdata; halt_addr <= 32'h50802014; end
+                  if(bus_we && bus_addr[11:0] == 12'h014) begin halted <= 1'b1; halt_code <= bus_wdata; end
                 end
                 C_WIN: if(bus_we) win_txaddr <= bus_wdata;           // TX_ADDR (the only fast window access)
                 C_APB: if(bus_we) begin
@@ -618,10 +610,10 @@ always @(posedge clk) begin
                 end
               end
               C_SIO: begin            // divider (not present) or interpolators
-                halted <= 1'b1; halt_code <= 32'hBAD00004; halt_addr <= bus_addr;
+                halted <= 1'b1; halt_code <= 32'hBAD00004;
               end
               default: begin
-                halted <= 1'b1; halt_code <= 32'hBAD00001; halt_addr <= bus_addr;
+                halted <= 1'b1; halt_code <= 32'hBAD00001;
               end
             endcase
           end

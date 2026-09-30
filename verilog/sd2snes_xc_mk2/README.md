@@ -24,15 +24,23 @@ these files and are unchanged.
 | `dcm.v` | `my_dcm` (CLK2 = 24 MHz x 25 / 7 = 85.7 MHz, as in the gsu core) and `soc_dcm` (soft CPU: 24 MHz x 5 / 3 = 40 MHz) |
 | `main.ucf` | the mk2 pinout (as sd2snes_gsu) plus TIG between CLK2 and the soft CPU clock (the paths through `xc_bridge`'s synchronizers) |
 | `xc_m0.v` | soft CPU core: register file in LUT RAM, no ROR/REV16/REVSH, MRS/MSR IPSR/PRIMASK only, no interrupts, no early fetch |
-| `xc_soc.v` | SoC: one 16 KB 2-way write-through cache for code and data, no divider, fixed APB reads, no BRR/tick/NVIC |
+| `xc_soc.v` | SoC: one 16 KB 2-way write-through cache for code and data, no divider, fixed APB reads, no BRR/tick/NVIC, 40-bit timer, no RAM clear at start, halt address not captured, no adders for the fixed PSRAM offsets |
 | `xc_cache.v` | cache storage; LRU bits in distributed RAM (no reset: they are only a replacement hint) |
 | `xc_bridge.v` | clock-domain bridge; its two 8 x 32 buffers in distributed RAM |
 | `xc_window.v`, `xc_stream.v` | `$3000` window, descriptor queue 2 entries deep |
 | `xc_top.v` | the blocks together, MSU-1 only, no performance counters |
-| `msu.v`, `xc_dac.v`, `xc_msubox.v` | MSU-1 audio (no data port), resampling DAC (Xilinx `dac_buf` ports), soft CPU → MSU-1 registers |
+| `msu.v`, `xc_dac.v`, `xc_msubox.v` | MSU-1 audio (no data port), DAC (Xilinx `dac_buf` ports; sample-and-hold instead of linear interpolation unless `XC_DAC_LINEAR` is defined), soft CPU → MSU-1 registers |
 | `address.v`, `cheat.v`, `mcu_cmd.v`, `sd_dma.v`, `spi.v` | as in `../sd2snes_xc` |
 
 Block RAM: cache data 8 (one per byte lane and way), cache tags 2, window rings 2, `dac_buf` 1, `snescmd_buf` 1: 14 of 16.
+
+## ISE results so far
+
+| Build | Slices | 4-input LUTs | Flip-flops |
+|---|---|---|---|
+| first build (XST speed) | 3,752 of 3,584 (105%) | 6,624 (92%) | 2,916 |
+| XST area | 3,766 (105%) | 6,660 (92%) | 2,917 |
+| + 40-bit timer, no RAM clear, no halt address, no offset adders, DAC without interpolation | (to be built; Yosys: −520 LUTs, −180 flip-flops) | | |
 
 ## Things to look at in the ISE reports
 
