@@ -172,6 +172,8 @@ reg rtc_pgm_we_buf;
 
 reg [7:0] MCU_DATA_OUT_BUF;
 reg [7:0] MCU_DATA_IN_BUF;
+reg [1:0] xca_statusr;             // Xeno Crisis decode service (registered status, see below)
+reg [10:0] xca_lenr;
 reg [2:0] mcu_nextaddr_buf;
 
 wire mcu_nextaddr;
@@ -552,9 +554,7 @@ always @(posedge clk) begin
   end
 end
 
-// Xeno Crisis decode service
-reg [1:0] xca_statusr;
-reg [10:0] xca_lenr;
+// Xeno Crisis decode service (xca_statusr / xca_lenr are declared above, before their first use)
 always @(posedge clk) begin
   xca_statusr <= xca_status;
   xca_lenr <= xca_len;

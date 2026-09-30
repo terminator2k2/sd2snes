@@ -139,15 +139,6 @@ always @(posedge clk) ring_room <= (host_tx_free > 10'd3);
 reg [31:0] stat_desc_r, stat_underrun_r;
 assign stat_desc = STATS ? stat_desc_r : 32'd0;
 assign stat_underrun = STATS ? stat_underrun_r : 32'd0;
-always @(posedge clk) begin
-  if(rst) begin
-    stat_underrun_r <= 0;
-    stat_desc_r <= 0;
-  end else begin
-    if(enable & snes_rd_start & (host_tx_pending == 0) & (q_count != 0)) stat_underrun_r <= stat_underrun_r + 1'b1;
-    if(post) stat_desc_r <= stat_desc_r + 1'b1;
-  end
-end
 
 //------------------------------------------------------------------------------
 // Register port, queue and DMA
@@ -163,6 +154,17 @@ wire post_len  = reg_cycle & we & (addr == 4'h1) & (wdata != 32'd0);
 wire post_imm  = reg_cycle & we & (addr == 4'h7);
 wire post      = (post_len | post_imm) & ~q_full;
 wire flush_now = reg_cycle & we & (addr == 4'h3) & wdata[0];
+
+// statistics (after 'post': XST needs declarations before use)
+always @(posedge clk) begin
+  if(rst) begin
+    stat_underrun_r <= 0;
+    stat_desc_r <= 0;
+  end else begin
+    if(enable & snes_rd_start & (host_tx_pending == 0) & (q_count != 0)) stat_underrun_r <= stat_underrun_r + 1'b1;
+    if(post) stat_desc_r <= stat_desc_r + 1'b1;
+  end
+end
 
 // a byte leaves the head descriptor this cycle
 reg take;
