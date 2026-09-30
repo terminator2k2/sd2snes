@@ -24,6 +24,8 @@
 #define BOOTLEG_CONSTANT  2   /* Soul Blade: 55,0F,AA,F0 */
 #define BOOTLEG_ALU       3   /* Tekken 2 / SF EX Plus Alpha: 4-bit count/shift unit */
 #define BOOTLEG_PORT6     4   /* A Bug's Life / Bananas: "port 6xxx" at 00-3F:6000-6FFF */
+#define BOOTLEG_BITSWAP40 5   /* Marvel vs SF: standard bitswap latch at 40-4F:8000-FFFF */
+#define BOOTLEG_KOF98     6   /* KOF98: standard bitswap + ROM bank switch at C0:8788 */
 
 extern uint8_t bootleg_scan;
 

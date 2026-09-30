@@ -247,7 +247,21 @@ wire [7:0] SNES_PA = (SNES_PAr[5] & SNES_PAr[4]);
 
 wire [7:0] SNES_DATA_IN = (SNES_DATAr[3] & SNES_DATAr[2]);
 
-reg  [23:0] SNES_ADDR_early; always @(posedge CLK2) SNES_ADDR_early <= (SNES_ADDRr[3] & SNES_ADDRr[2]);
+/* KOF98 bootleg bank switch (bootleg.v): while active, ROM accesses see A19..A16
+   replaced before address decoding.  Declared here because SNES_ADDR_early
+   (ISE wants declare-before-use) feeds address.v.  Only ROM accesses (A15, or
+   banks 40-7D/C0-FF) are remapped, so the full-address decoders for $2Axx-$2Cxx
+   never see a changed bank. */
+wire       bootleg_rom_bank_en;
+wire [3:0] bootleg_rom_bank;
+wire [23:0] SNES_ADDR_early_raw = (SNES_ADDRr[3] & SNES_ADDRr[2]);
+wire        SNES_ADDR_early_wram = ~SNES_ADDR_early_raw[23] & (SNES_ADDR_early_raw[22:17] == 6'b111111); // 7E-7F
+wire        SNES_ADDR_early_rom  = ~SNES_ADDR_early_wram
+                                 & (SNES_ADDR_early_raw[15] | SNES_ADDR_early_raw[22]);  // = /ROMSEL decode
+reg  [23:0] SNES_ADDR_early; always @(posedge CLK2)
+  SNES_ADDR_early <= (bootleg_rom_bank_en & SNES_ADDR_early_rom)
+                     ? {SNES_ADDR_early_raw[23:20], bootleg_rom_bank, SNES_ADDR_early_raw[15:0]}
+                     : SNES_ADDR_early_raw;
 
 wire SNES_PULSE_IN = SNES_READ_IN & SNES_WRITE_IN & ~SNES_CPU_CLK_IN;
 
@@ -844,7 +858,9 @@ bootleg snes_bootleg(
   .wr_strobe(SNES_WR_end),
   .rd_hit(bootleg_rd_hit),
   .data_out(BOOTLEG_SNES_DATA_OUT),
-  .open_bus(bootleg_open_bus)
+  .open_bus(bootleg_open_bus),
+  .rom_bank_en(bootleg_rom_bank_en),
+  .rom_bank(bootleg_rom_bank)
 );
 
 reg pad_latch = 0;
