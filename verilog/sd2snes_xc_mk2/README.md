@@ -4,8 +4,9 @@
 `Makefile`, `sd2snes_xc_mk2.xise` (Verilog macros `MK2 | XC_MSU`), `main.ucf`, `config.vh`, `dcm.v` and the Xilinx
 memory blocks in `ip/mk2`. `make mk2` builds `fpga_xc_mk2.bit`; `make mk2s` runs SmartXplorer.
 
-**State: it fits and meets timing (soft CPU at 20 MHz), the mk2 firmware loads it, and the music plays from an
-MSU-1 pack. There are no sound effects:**
+**State: it fits and meets timing (soft CPU at 20 MHz), the mk2 firmware loads it, the music plays from an MSU-1
+pack and the sound effects are mixed in software. Tested in MesenCE (mk2 mode) and in RTL-in-the-loop simulation
+(below), not yet on hardware.**
 
 - The mk2 MCU firmware (`config-mk2`) detects the cartridge, builds the image like the mk3 firmware (and applies the
   "MK2P" table), and loads `/sd2snes/fpga_xc_mk2.bit`. The SD card needs the same files as on mk3:
@@ -13,10 +14,9 @@ MSU-1 pack. There are no sound effects:**
   and an MSU-1 pack next to the ROM for music.
 - The mixer's tick, interrupts and the BRR encoder were removed to make room (see `experiments/`). Instead, the mk2
   table starts the mixer (`src/xc_soc/xc_mix.c`) in a mode without interrupts: the firmware's wait loops call
-  `xc_mix_poll()`, which runs the 1 kHz ticks that are due. It sends the music requests to the MSU-1 exactly as on
-  mk3; the sound effects run their course (the game sees the same voice state) but are not mixed, and the BRR rings
-  that go to the SNES get silence.
-- Tested in MesenCE (mk2 mode) and in RTL-in-the-loop simulation (below), not yet on hardware.
+  `xc_mix_poll()`, which runs the 1 kHz ticks that are due and mixes a block or two while the BRR rings have room.
+  It sends the music requests to the MSU-1 exactly as on mk3, and mixes and BRR-encodes the sound effects in
+  software (hand-written assembly; see "mk2 mixing" in `src/xc_soc/README.md`).
 
 MSU-1 only (the music comes from an MSU-1 pack). The mk3 cores (`../sd2snes_xc`, `../sd2snes_xc_msu`) do not use
 these files and are unchanged.
@@ -57,15 +57,20 @@ at 20 MHz.
 `xc_top` as in this folder (16 KB write-through cache, RAM not cleared), Verilated, with MesenCE running the SNES
 side; 3,600 frames of the test script, every core and DMA access checked against a reference memory:
 
-| | 20 MHz, no mixer | 40 MHz, no mixer | 20 MHz, mixer from the wait loops | mk3 (40 MHz, mixer on interrupts) |
-|---|---|---|---|---|
-| game ticks later than one frame | 30 of 3,566 | 25 of 3,571 | 7 of 3,658 | 2 of 3,651 |
-| frame message → stream post, p50 / p99 / max | 4.6 / 16.5 / 55.7 ms | 3.3 / 16.5 / 35.3 ms | 7.5 / 12.3 / 55.8 ms | 6.1 ms (p50) |
-| bytes the SNES read from the stream | 1,620,863 | 1,593,610 | 3,228,989 | 3,227,563 (MesenCE) |
-| mismatches against the reference memory | 0 | 0 | 0 | 0 |
+| | 20 MHz, no mixer | 40 MHz, no mixer | 20 MHz, music only (silent BRR) | 20 MHz, full sound | mk3 (40 MHz, mixer on interrupts) |
+|---|---|---|---|---|---|
+| game ticks later than one frame | 30 of 3,566 | 25 of 3,571 | 7 of 3,658 | 7 of 3,612 | 2 of 3,651 |
+| frame message → stream post, p50 / p99 / max | 4.6 / 16.5 / 55.7 ms | 3.3 / 16.5 / 35.3 ms | 7.5 / 12.3 / 55.8 ms | 7.9 / 13.3 / 55.9 ms | 6.1 ms (p50) |
+| BRR blocks mixed | – | – | | 89,040 (1,487/s) | 89,360 (MesenCE) |
+| mixer's share of the CPU | – | – | | 24.1% | |
+| left BRR ring empty (sampled every ms) | | | | 3 of 59,869 | |
+| mismatches against the reference memory | 0 | 0 | 0 | 0 | 0 |
 
 Without the mixer, the BRR rings stay empty and the SNES gets only half the stream; with it, the stream is as on
-mk3 again (silent BRR blocks). The two runs without the mixer halted after the last frame, while the simulation was
+mk3 again. With full sound, the mixer keeps up: the left BRR ring was empty in 3 of 59,869 one-millisecond samples
+(less than half full in 8,103; then the mixer mixes more blocks per call and the encoder uses its fast mode, which
+it did for 10,396 blocks). The game takes a slightly different course than in the other runs (the CPU timing is
+different), so its stream totals are not comparable. The two runs without the mixer halted after the last frame, while the simulation was
 shutting down; the run with the mixer did not. In MesenCE, the MSU-1 register writes of the mk2 mode (17 in the
 test script: 4 track requests including an intro → loop change, and pauses) are the same as on the mk3 MSU-1 core,
 to within 1 ms.

@@ -22,6 +22,7 @@
  */
 #include <stdint.h>
 #include "xc_soc.h"
+uint32_t xc_brr_encode(const int16_t* s, uint32_t stride_bytes, uint32_t* ab);   /* xc_brr_sw.S */
 
 /* ---- firmware RAM layout (Xeno Crisis SNES v1.00, see MesenCE XcAudio.cpp) ---- */
 #define DecoderPtr      0x20017594u
@@ -75,13 +76,13 @@ static inline int valid_addr(uint32_t a, uint32_t size)
 
 /* ---- the firmware's rounding helpers, rewritten without division (exact, see test_mix_math.c) ---- */
 /* x / 2^k rounded towards zero */
-static inline int32_t div_pow2(int32_t x, int k)
+static inline __attribute__((always_inline)) int32_t div_pow2(int32_t x, int k)
 {
 	return (x + (int32_t)((uint32_t)(x >> 31) >> (32 - k))) >> k;
 }
 
 /* 0x10067CE4: Q15 multiply, q = p / 16384; return q / 2 + q % 2 (C semantics) */
-static inline int32_t qmul(int32_t a, int32_t b)
+static inline __attribute__((always_inline)) int32_t qmul(int32_t a, int32_t b)
 {
 	int32_t p = (int32_t)((uint32_t)a * (uint32_t)b);
 	int32_t q = div_pow2(p, 14);
@@ -90,7 +91,7 @@ static inline int32_t qmul(int32_t a, int32_t b)
 }
 
 /* saturation after mixing: if out of range, (x / 32768) * 32760 */
-static inline int32_t clamp(int32_t x)
+static inline __attribute__((always_inline)) int32_t clamp(int32_t x)
 {
 	if((uint32_t)x + 0x7FFFu > 0xFFFEu) {
 		return (int32_t)((uint32_t)div_pow2(x, 15) * 32760u);
@@ -115,8 +116,7 @@ static struct {
 	uint32_t ms_paused;
 	uint32_t ms_seen_play;   /* the MSU-1 reported playing since the last play command */
 	uint32_t ms_age;         /* ticks since the last play command */
-	uint32_t coop;           /* mk2 core: no tick IRQ or BRR encoder; run from the firmware's wait loops, silent */
-	uint32_t coop_next;      /* mk2: time of the next tick (microseconds, low 32 bits of the timer) */
+	uint32_t coop;           /* mk2 core: no tick IRQ or BRR encoder; run from the firmware's wait loops */
 } st;
 
 static void music_after_decode(int have_decode, int32_t ret);
@@ -129,13 +129,16 @@ struct xc_dbg {
 	uint32_t mode;           /* bit 0: MSU-1 mode; bits 15:8 phase, 23:16 ms_state */
 	uint32_t ticks, calls, sfx, blocks, deferred, packets;
 	uint32_t msu_writes, msu_status, track;
+	uint32_t coop_us;        /* mk2: microseconds spent in the mixer (xc_mix_poll with ticks due), for the load */
+	uint32_t fast;           /* mk2: blocks encoded in fast mode (the mixer had fallen behind) */
 };
 static struct xc_dbg dbg __attribute__((section(".bss.xc_dbg"), used));
 
-/* mk2: XC_COOP_MAGIC once xc_mix_install_mk2() ran; until then xc_mix_poll() does nothing (checked by the wrapper
-   in xc_mix_entry.S; a magic value, because the mk2 core does not clear the RAM at start) */
+/* mk2, read by xc_mix_poll() (xc_mix_entry.S) before it does anything: magic = XC_COOP_MAGIC once
+   xc_mix_install_mk2() ran (a magic value, because the mk2 core does not clear the RAM at start); next = time of
+   the next tick (microseconds, low 32 bits of the timer) */
 #define XC_COOP_MAGIC 0x434F4F50u   /* "COOP" */
-uint32_t xc_mix_coop;
+struct { uint32_t magic, next; } xc_mix_coop;
 
 /* ---- MSU-1 mode (fpga_xc_msu.bi3: CTRL bit 3) ----
  * The music comes from an MSU-1 pack. The packets are still walked at the same pace (the game's music
@@ -265,8 +268,9 @@ static void call_begin(void)
 	/* sound effect triggers queued by core 0 */
 	for(uint32_t i = 0; i < 8; i++) {
 		uint32_t t = Triggers + i * 12;
+		if(!R8(t)) continue;
 		uint8_t voice = R8(t + 1);
-		if(R8(t) && voice <= 3) {
+		if(voice <= 3) {
 			uint32_t v = Voices + voice * 32;
 			R8(v + 0x1C) = 1;
 			R8(v + 0x1D) = 0;
@@ -447,63 +451,163 @@ static void mix(void)
 	XC_MIX_EVENT = XC_EV_CALL_END;
 }
 
-/* ---- mk2 (no BRR encoder): silent blocks ----
- * What xc_brr gives for 16 zero samples: every shift has error 0 and the first (12) wins, header 12 << 4 | loop
- * flag, all nibbles 0. The ring's last block also gets the END flag, as in encode_to_ring(). */
-static void silent_to_ring(uint32_t ring, uint32_t write_reg, uint32_t free_reg)
-{
-	uint32_t offset = R32(write_reg);
-	R32(free_reg) = R32(free_reg) - 9;
-	uint32_t dst = ring + offset;
-	R32(write_reg) = (offset + 9) % BrrRingSize;
-	R8(dst) = 0xC2u | ((dst == ring + BrrRingSize - 9) ? 1u : 0u);
-	for(uint32_t i = 1; i < 9; i++) R8(dst + i) = 0;
-}
+/* ---- mk2: mixing and BRR encoding in software ---- */
+/* The voice loops give the same results as the one in mix_blocks(), with the fields in registers and the position
+   written back once. add = 0: the first voice of the block (the buffer is not set yet). */
 
-/* a voice through one 16-sample block without its samples: the same position and end as mix_blocks() */
-static void voice_skip(uint32_t v)
+/* one voice, mono: buf[k] = samples 2k (bits 15:0) and 2k + 1 (31:16). In assembly (xc_mix_voice.S; the compiled
+   C spilled to the stack in the loop, and every store is an SRAM write here); test_mix_voice_asm.py checks it
+   against this loop in C. */
+void xc_mix_voice_mono(uint32_t v, uint32_t* buf, int add);
+#define mix_voice_mono xc_mix_voice_mono
+
+/* one voice, stereo: buf[i] = sample i left (bits 15:0) and right (31:16) */
+static void mix_voice_stereo(uint32_t v, uint32_t* buf, int add)
 {
 	int32_t length = (int32_t)R32(v);
-	int32_t pos = (int32_t)R32(v + 0x0C), step = (int32_t)R32(v + 0x08);
-	/* fast path: the position only grows and the 16th sample is still inside the sound */
-	if(step >= 0 && pos >= 0 && pos <= 0x7FFFFFFF - 16 * step && div_pow2(pos + 15 * step, 15) < length) {
-		R32(v + 0x0C) = (uint32_t)(pos + 16 * step);
-		return;
-	}
-	for(int i = 0; i < 16; i++) {
-		pos = (int32_t)R32(v + 0x0C);
+	int32_t pos = (int32_t)R32(v + 0x0C);
+	int32_t step = (int32_t)R32(v + 0x08);
+	uint32_t base = R32(v + 4);
+	int32_t vl = (int32_t)R32(v + 0x10), vr = (int32_t)R32(v + 0x14);
+	int i = 0;
+	for(; i < 16; i++) {
 		int32_t idx = div_pow2(pos, 15);
 		if(length <= idx || pos < (int32_t)0xFFFF8001u) {
 			R8(v + 0x1C) = 0;
 			R8(v + 0x1D) = 1;
 			break;
 		}
-		R32(v + 0x0C) = (uint32_t)((int32_t)R32(v + 0x08) + pos);
+		int32_t sample = S16(base + (uint32_t)idx * 2);
+		int32_t l = qmul(sample, vl), r = qmul(sample, vr);
+		if(add) {
+			uint32_t w = buf[i];
+			l += (int32_t)(int16_t)w;
+			r += (int32_t)w >> 16;
+		}
+		l = clamp(l); r = clamp(r);
+		buf[i] = ((uint32_t)l & 0xFFFFu) | (uint32_t)r << 16;
+		pos += step;
+	}
+	if(!add) for(; i < 16; i++) buf[i] = 0;
+	R32(v + 0x0C) = (uint32_t)pos;
+}
+
+/* 9 bytes (h, then a and b most significant byte first) to dst with the fewest aligned stores */
+static inline __attribute__((always_inline)) void store9(uint32_t dst, uint32_t h, uint32_t a, uint32_t b)
+{
+	uint32_t ra = __builtin_bswap32(a), rb = __builtin_bswap32(b);   /* bytes 1-4, 5-8 in memory order */
+	uint32_t w0 = h | ra << 8, w1 = ra >> 24 | rb << 8, last = rb >> 24;
+	switch(dst & 3) {
+	case 0:
+		R32(dst) = w0; R32(dst + 4) = w1; R8(dst + 8) = (uint8_t)last;
+		break;
+	case 1:
+		R8(dst) = (uint8_t)h;
+		*(volatile uint16_t*)(dst + 1) = (uint16_t)(w0 >> 8);
+		R32(dst + 3) = w0 >> 24 | w1 << 8;
+		*(volatile uint16_t*)(dst + 7) = (uint16_t)(w1 >> 24 | last << 8);
+		break;
+	case 2:
+		*(volatile uint16_t*)dst = (uint16_t)w0;
+		R32(dst + 2) = w0 >> 16 | w1 << 16;
+		*(volatile uint16_t*)(dst + 6) = (uint16_t)(w1 >> 16);
+		R8(dst + 8) = (uint8_t)last;
+		break;
+	default:
+		R8(dst) = (uint8_t)h;
+		R32(dst + 1) = ra;
+		R32(dst + 5) = rb;
+		break;
+	}
+}
+
+/* a BRR ring's next block (END flag on the ring's last block) */
+static inline __attribute__((always_inline)) void ring_put(uint32_t ring, uint32_t write_reg, uint32_t free_reg,
+                                                           uint32_t h, uint32_t a, uint32_t b)
+{
+	uint32_t offset = R32(write_reg);
+	R32(free_reg) = R32(free_reg) - 9;
+	uint32_t dst = ring + offset;
+	offset += 9;
+	R32(write_reg) = offset >= BrrRingSize ? offset - BrrRingSize : offset;
+	store9(dst, h | (dst == ring + BrrRingSize - 9 ? 1u : 0u), a, b);
+}
+
+/* the BRR block of 16 samples (s[0], s[stride], ...; s = 0: silence, what xc_brr gives for 16 zeros: shift 12,
+   loop flag, nibbles 0) to the left (rings bit 0) and/or right (bit 1) ring */
+static void __attribute__((noinline)) coop_emit(const int16_t* s, int stride, int rings)
+{
+	uint32_t h = 0xC2u, a = 0, b = 0;
+	if(s) {
+		/* (16 zeros come out as silence too: all nibbles 0 give shift 12) */
+		uint32_t ab[2];
+		/* fast mode (bit 0) when the mixer has fallen behind: the left ring is less than half full */
+		uint32_t fast = R32(BrrLeftFree) > BrrRingSize / 2 ? 1u : 0u;
+		h = xc_brr_encode(s, (uint32_t)stride * 2u | fast, ab);   /* xc_brr_sw.S: brr_sw_encode() in assembly */
+		dbg.fast += fast;
+		a = ab[0]; b = ab[1];
+	}
+	if(rings & 1) ring_put(BrrLeft, BrrLeftWrite, BrrLeftFree, h, a, b);
+	if(rings & 2) ring_put(BrrRight, BrrRightWrite, BrrRightFree, h, a, b);
+}
+
+/* mk2: up to n blocks while the BRR rings have room (the same pacing of the music position as mix_blocks()) */
+static void coop_blocks(uint32_t n)
+{
+	while(n && R32(BrrLeftFree) > 8) {
+		n--;
+		/* the MSU-1 plays the music; its ring slot still paces the game's music position */
+		if(R8(MusicPlaying)) {
+			uint32_t free_count = R32(PcmFree);
+			if(((PcmRingSize - free_count - st.held) >> 5) != 0) {
+				R32(PcmFree) = free_count + 0x20;
+				uint32_t rd = R32(PcmRead) + 0x20;
+				R32(PcmRead) = rd >= PcmRingSize ? rd - PcmRingSize : rd;
+			} else {
+				XC_MIX_EVENT = XC_EV_UNDERRUN;
+			}
+		}
+		/* the voices, into 16-bit samples (the sums are saturated to 16 bits anyway), two per word, since every
+		   store costs an SRAM write here. The game's sound effects have the same volume left and right: then
+		   one channel is mixed and encoded, and the block goes to both rings. Otherwise the channels are
+		   interleaved (left, right, ...). */
+		uint32_t act = 0;
+		int mono = 1;
+		for(uint32_t voice = 0; voice < 4; voice++) {
+			uint32_t v = Voices + voice * 32;
+			if(R8(v + 0x1C)) {
+				act |= 1u << voice;
+				if(R32(v + 0x10) != R32(v + 0x14)) mono = 0;
+			}
+		}
+		dbg.blocks++;
+		if(!act) {
+			coop_emit(0, 1, 3);
+			continue;
+		}
+		uint32_t buf[16];
+		int add = 0;
+		for(uint32_t voice = 0; voice < 4; voice++) {
+			if(!(act & (1u << voice))) continue;
+			uint32_t v = Voices + voice * 32;
+			if(mono) mix_voice_mono(v, buf, add);
+			else mix_voice_stereo(v, buf, add);
+			add = 1;
+		}
+		if(mono) {
+			coop_emit((const int16_t*)buf, 1, 3);
+		} else {
+			coop_emit((const int16_t*)buf, 2, 1);
+			coop_emit((const int16_t*)buf + 1, 2, 2);
+		}
 	}
 }
 
 /* 16-sample blocks while the BRR rings have room; music from the decoded part of the PCM ring only */
 static void mix_blocks(void)
 {
+	if(st.coop) return;   /* mk2: xc_mix_poll_body() mixes (coop_blocks) */
 	while(R32(BrrLeftFree) > 8) {
-		if(st.coop) {
-			/* mk2: the music comes from the MSU-1; the ring still paces the game's music position */
-			if(R8(MusicPlaying)) {
-				uint32_t free_count = R32(PcmFree);
-				if(((PcmRingSize - free_count - st.held) >> 5) != 0) {
-					R32(PcmFree) = free_count + 0x20;
-					R32(PcmRead) = (R32(PcmRead) + 0x20) % PcmRingSize;
-				}
-			}
-			for(uint32_t voice = 0; voice < 4; voice++) {
-				uint32_t v = Voices + voice * 32;
-				if(R8(v + 0x1C)) voice_skip(v);
-			}
-			dbg.blocks++;
-			silent_to_ring(BrrLeft, BrrLeftWrite, BrrLeftFree);
-			silent_to_ring(BrrRight, BrrRightWrite, BrrRightFree);
-			continue;
-		}
 		int32_t left[16], right[16];
 		int music = 0;
 		if(R8(MusicPlaying)) {
@@ -511,7 +615,9 @@ static void mix_blocks(void)
 			if(((PcmRingSize - free_count - st.held) >> 5) != 0) {
 				uint32_t rd = R32(PcmRead);
 				R32(PcmFree) = free_count + 0x20;
-				R32(PcmRead) = (rd + 0x20) % PcmRingSize;
+				rd += 0x20;
+				R32(PcmRead) = rd >= PcmRingSize ? rd - PcmRingSize : rd;   /* = (rd + 0x20) % PcmRingSize */
+				rd -= 0x20;
 				uint32_t p = PcmRing + rd * 2;
 				if(!st.msu) {
 					for(int i = 0; i < 16; i++) {
@@ -579,24 +685,34 @@ void xc_mix_decoded(void)
 
 /* ---- mk2: the mixer without interrupts ----
  * The mk2 core has no tick timer, interrupts or BRR encoder (no room in the XC3S400). The firmware's wait loops
- * (bus layer, sleep_until: xc_shim.c) call xc_mix_poll(), which runs the 1 kHz ticks that are due, up to
- * COOP_CATCHUP at a time; after a longer gap the rest are dropped (the BRR rings are full after a few ticks
- * anyway). Music: the same track logic as the mk3 MSU-1 core. Sound effects: their voices run (start, position,
- * end) as on mk3, but nothing is mixed: the BRR rings get silence. Core 1 counts as parked all the time, because
- * the mixer only ever runs inside a call made by core 0 (core 0's flash save waits for Core1Parked in a loop that
- * calls nothing). */
+ * (bus layer, sleep_until: xc_shim.c) call xc_mix_poll() (xc_mix_entry.S). It returns at once, without a single
+ * store (every store costs an SRAM write on the mk2 core, and the wait loops call it all the time), unless a tick
+ * is due or the left BRR ring has room for a block; then it calls xc_mix_poll_body() on the mixer's stack, which
+ * runs the due ticks (up to COOP_CATCHUP; after a longer gap the rest are dropped) and mixes up to COOP_BLOCKS
+ * blocks (COOP_BLOCKS_BEHIND, and the encoder's fast mode, while the rings are less than half full, e.g. after core
+ * 0 was busy for a while). So the mixing fills core 0's waiting time a little at a time (core 0 is held up by that
+ * much at most), until the rings (~128 ms) are full. Music: the same track logic as the mk3 MSU-1 core. Sound effects: mixed as on mk3,
+ * BRR-encoded in software (xc_brr_sw.h). Core 1 counts as parked all the time, because the mixer only ever runs
+ * inside a call made by core 0 (core 0's flash save waits for Core1Parked in a loop that calls nothing). */
 #define COOP_CATCHUP 16u
+#define COOP_BLOCKS 2u          /* per call: ~0.3 ms at 20 MHz at most */
+#define COOP_BLOCKS_BEHIND 8u   /* per call while the rings are less than half full (~1.2 ms) */
 static uint32_t timer_lo(void) { return *(volatile uint32_t*)0x40054028u; }   /* TIMERAWL */
 
 void xc_mix_poll_body(void)
 {
-	uint32_t now = timer_lo();
+	XC_MIX_EVENT = XC_EV_COOP_ENTER;   /* for the simulation's statistics (a fast register write, no SRAM) */
+	uint32_t t0 = timer_lo(), now = t0;
 	uint32_t n = 0;
-	while((int32_t)(now - st.coop_next) >= 0) {
-		if(n++ == COOP_CATCHUP) { st.coop_next = now + 1000u; break; }
-		st.coop_next += 1000u;
+	while((int32_t)(now - xc_mix_coop.next) >= 0) {
+		if(n++ == COOP_CATCHUP) { xc_mix_coop.next = now + 1000u; break; }
+		xc_mix_coop.next += 1000u;
 		xc_mix_tick();
 	}
+	if(st.phase == PH_IDLE && !R8(Locks + 0) && !R8(Locks + 1))
+		coop_blocks(R32(BrrLeftFree) > BrrRingSize / 2 ? COOP_BLOCKS_BEHIND : COOP_BLOCKS);
+	dbg.coop_us += timer_lo() - t0;
+	XC_MIX_EVENT = XC_EV_COOP_LEAVE;
 }
 
 /* ---- replaces multicore_launch_core1(core1_entry) in the firmware ---- */
@@ -637,6 +753,6 @@ void xc_mix_install_mk2(void (*entry)(void))
 	R32(DecoderErr) = 0;
 	R8(ResetFlag) = 1;
 	R32(Core1Parked) = 1;
-	st.coop_next = timer_lo();
-	xc_mix_coop = XC_COOP_MAGIC;
+	xc_mix_coop.next = timer_lo();
+	xc_mix_coop.magic = XC_COOP_MAGIC;
 }

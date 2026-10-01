@@ -41,6 +41,8 @@
 #define   XC_EV_CALL_END    2u
 #define   XC_EV_UNDERRUN    3u  /* music playing but no PCM for a block */
 #define   XC_EV_DEFERRED    4u  /* mixing postponed: lock 0 held by core 0 */
+#define   XC_EV_COOP_ENTER  0x10u /* mk2: xc_mix_poll_body() starts (simulation statistics) */
+#define   XC_EV_COOP_LEAVE  0x11u /* mk2: xc_mix_poll_body() ends */
 
 /* Debug port */
 #define XC_DEBUG_CHAR     (*(volatile uint32_t*)(XC_TICK_BASE + 0x10u))  /* write: one character of debug output */

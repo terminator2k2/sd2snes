@@ -1,5 +1,5 @@
-# xc_soc.bin: the Xeno Crisis soft CPU support file (sd2snes_xc / sd2snes_xc_msu cores). Built with the mk3
-# firmware (src/Makefile) and shipped next to it in /sd2snes/; the firmware loads it with the game (xc_load.c).
+# xc_soc.bin: the Xeno Crisis soft CPU support file (sd2snes_xc / sd2snes_xc_msu / sd2snes_xc_mk2 cores). Built
+# with the mk3 and mk2 firmware (src/Makefile) and shipped next to it in /sd2snes/; the firmware loads it with the game (xc_load.c).
 #   make [OUT=dir]   ->  $(OUT)/xc_soc.bin (also xc_fw.bin, xc_bootrom.bin, used by the image tools here)
 #
 # Contents:
@@ -17,7 +17,7 @@ CFLAGS := -mcpu=cortex-m0plus -mthumb -mfloat-abi=soft -Os -ffreestanding -fno-b
           -fdata-sections -Wall -Wextra -Werror -Wno-unused-parameter
 AFLAGS := -mcpu=cortex-m0plus
 
-FW_OBJ := $(B)/xc_fw_header.o $(B)/xc_mix.o $(B)/xc_shim.o $(B)/xc_mix_entry.o $(B)/xc_div.o
+FW_OBJ := $(B)/xc_fw_header.o $(B)/xc_mix.o $(B)/xc_shim.o $(B)/xc_mix_entry.o $(B)/xc_div.o $(B)/xc_brr_sw.o $(B)/xc_mix_voice.o
 ROM_OBJ := $(B)/xc_bootrom_tables.o $(B)/xc_bootrom.o $(B)/xc_bootrom_flags.o
 
 all: $(OUT)/xc_soc.bin

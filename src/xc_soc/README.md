@@ -29,9 +29,10 @@ together.
 | Part | Source | Runs at (soft CPU) | Purpose |
 |---|---|---|---|
 | Replacement bootrom | `xc_bootrom.c`, `xc_bootrom_tables.S`, `xc_bootrom_flags.S`, `xc_bootrom.ld` | `0x00000000` | The RP2040 boot ROM functions that the pico-sdk runtime looks up: the lookup tables, bit operations, memset/memcpy and the soft-float/soft-double tables (built on libgcc). Functions the game never calls during play (sqrt, trig, exp/log) stop with a panic code. |
-| Audio mixer | `xc_mix.c`, `xc_mix_entry.S`, `xc_mix.ld` | `0x10F00000` (free flash space), data and stack in `SCRATCH_X` | On the cartridge, core 1 decodes the Opus music and mixes it with the sound effects. The soft CPU has no second core, so this work runs as two interrupt handlers instead: a 1 kHz tick and a "packet decoded" interrupt. The MCU decodes the Opus packets, which it receives through a mailbox. The `xc_brr` hardware block does the BRR encoding. On the MSU-1 core, the mixer sends the game's music commands to the MSU-1 instead, and only mixes the sound effects. On the mk2 core (no tick timer, interrupts or BRR encoder), the mk2 table starts it in a mode without interrupts instead: the firmware's wait loops in `xc_shim.c` call `xc_mix_poll()`, which runs the 1 kHz ticks that are due. There it only drives the MSU-1 music; the sound effects run their course without being mixed, and the BRR rings get silence. |
+| Audio mixer | `xc_mix.c`, `xc_mix_entry.S`, `xc_mix.ld` | `0x10F00000` (free flash space), data and stack in `SCRATCH_X` | On the cartridge, core 1 decodes the Opus music and mixes it with the sound effects. The soft CPU has no second core, so this work runs as two interrupt handlers instead: a 1 kHz tick and a "packet decoded" interrupt. The MCU decodes the Opus packets, which it receives through a mailbox. The `xc_brr` hardware block does the BRR encoding. On the MSU-1 core, the mixer sends the game's music commands to the MSU-1 instead, and only mixes the sound effects. On the mk2 core (no tick timer, interrupts or BRR encoder), the mk2 table starts it in a mode without interrupts instead: the firmware's wait loops in `xc_shim.c` call `xc_mix_poll()`, which runs the 1 kHz ticks that are due and mixes a block or two while the BRR rings have room. The sound effects are mixed and BRR-encoded in software there (`xc_mix_voice.S`, `xc_brr_sw.S`), the music comes from the MSU-1. |
 | Function replacements | `xc_shim.c` | `0x10F00000` region | Replacements for firmware functions that depend on RP2040 hardware: the SNES bus layer (PIO + DMA → the `$3000` window FIFOs), `sleep_until`, `puts`/`printf` (→ debug port), `panic`, and the flash write/erase functions (→ the save area, which lives in the cartridge SRAM and is saved as the `.srm` file). |
 | Patch table | `xc_fw_header.c` | `0x10F00000` | The header ("MXCX", version 2) with the list of firmware addresses to redirect. `multicore_launch_core1` becomes `xc_mix_install`, which sets up the mixer. Clock and stdio setup become "return 0". A second table ("MK2P") follows it; only a loader for a core without the SIO hardware divider (sd2snes mk2) applies it. |
+| mk2 mixing | `xc_mix_voice.S`, `xc_brr_sw.S`, `xc_brr_sw.h` | `0x10F00000` region | Mono voice mixing and the BRR encoder in hand-written Thumb assembly, for the mk2 core (see "mk2 mixing" below). |
 | mk2 table | `xc_fw_header.c` | – | After the main table ("MK2P"): the divider functions below, and `multicore_launch_core1` → `xc_mix_install_mk2` (the mixer without interrupts). |
 | Software division (mk2 only) | `xc_div.S` | `0x10F00000` region | Replacements for the pico-sdk divider functions (32- and 64-bit, signed and unsigned), for the mk2 core, which has no SIO divider. They give the same results in r0–r3 as the originals, including division by zero. The mk3 cores keep the hardware divider and don't use them. |
 | Register map | `xc_soc.h` | – | The SoC registers the FPGA cores add around the CPU: BRR encoder, decode mailbox / MSU-1 control, tick timer, debug port, `$3000` window, IRQ numbers. |
@@ -69,6 +70,38 @@ soft CPU implements what the game firmware uses: the Cortex-M0+ subset, includin
 - `test_mix_math.c`: a host test. It checks that the mixer's division-free rounding helpers give the same
   results as the firmware's division-based ones for every input. Build and run it with
   `cc -O2 test_mix_math.c && ./a.out`.
+- `test_brr_sw.c`: host test of the mk2 software BRR encoder (`xc_brr_sw.h`) against the firmware's brute-force
+  encoder: `cc -O2 test_brr_sw.c -lm && ./a.out [blocks.bin ...]` (without files: 2 million random blocks;
+  `blocks.bin`: 16 int16 per block, as MesenCE writes them with `XC_BRRDUMP=file`).
+- `test_brr_sw_asm.py`, `test_mix_voice_asm.py`: run the assembly (`xc_brr_sw.S`, `xc_mix_voice.S`) in the Unicorn
+  ARM emulator (`pip install unicorn`) and compare it with the C versions, block by block.
 - `xc_patch_image.py`, `xc_build_image.py`: offline tools that apply the same patches to a flash dump and build
   a complete prebuilt image. The firmware does this itself at load time now, so these are only needed for
   debugging or for comparing against an emulator (for example MesenCE).
+
+## mk2 mixing
+
+The sd2snes mk2 core has no room for the mixer's tick timer, interrupts or the `xc_brr` encoder, and it runs the
+soft CPU at 20 MHz. There the mixer (`xc_mix_install_mk2`) runs from core 0's wait loops, and does in software
+what `xc_brr` does in hardware on mk3:
+
+- **When:** `xc_mix_poll()` (`xc_mix_entry.S`) is called in every round of the firmware's wait loops. It checks,
+  without a single store, whether a tick is due or the left BRR ring has room; only then does it switch to the
+  mixer's stack and run the due ticks and two blocks (about 0.15 ms each; eight, and the encoder's fast mode,
+  while the rings are less than half full). The mixer only runs inside
+  core 0's calls, so core 1 counts as always parked (core 0's save waits for that in a loop that calls nothing).
+- **Why stores matter:** the mk2 core's cache is write-through, so every store (including every register pushed on
+  the stack) goes out to the 8-bit SRAM chip. The compiled C spilled registers inside its loops; the hot loops are
+  therefore written in assembly, with everything in registers.
+- **Mixing:** the game's sound effects have the same volume left and right. Then one channel is mixed, into
+  16-bit samples two per word, encoded once, and written to both rings (4 stores per block and ring instead of
+  9). Voices with different volumes fall back to a stereo path in C.
+- **BRR encoding** (`xc_brr_sw.h`, `xc_brr_sw.S`): the firmware tries all 11 shifts per block. This encoder takes
+  the smallest shift at which no sample clips (s0) and s0 - 1, with the firmware's nibble rule and error sum; s0 - 1
+  is skipped when a lower bound of its error (the clipping of the largest and smallest sample) already reaches
+  the error at s0, or the most that error can be. On the game's sound effects (178,720 blocks from 60 s of play)
+  99.9% of the blocks come out identical to the firmware's, the rest have the same error. On very loud blocks the
+  firmware's 32-bit error sum can wrap and pick a clipping shift; this one does not follow it there. Fast mode
+  (s0 only, when the mixer has fallen behind) gives ~1 dB more noise on about 10% of the blocks.
+- **Result** (RTL simulation of the mk2 core at 20 MHz, 60 s of play): 1,487 blocks per second, the game needs
+  ~1,490; the mixer takes 24% of the CPU; the left BRR ring was empty in 3 of 59,869 millisecond samples.
