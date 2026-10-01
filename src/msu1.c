@@ -546,7 +546,7 @@ int msu1_loop() {
     msu_audio_end();
 
 #ifdef XC_MSU_DIAG
-    /* Xeno Crisis: diagnostics to /sd2snes/xcaudio.txt, 3 s after the start and then every 10 s */
+    /* Xeno Crisis: diagnostics to /sd2snes/xc_debug.txt, 3 s after the start and then every 10 s */
     if(romprops.has_xc && getticks() > xc_log_next) {
       xc_log_next = getticks() + MS_TO_TICKS(10000);
       xc_msu_log("MSU-1");

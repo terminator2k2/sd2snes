@@ -90,35 +90,79 @@ static int patch_entry(uint32_t off)
   return 1;
 }
 
+/* the outcome of loading the two files, for /sd2snes/xc_debug.txt (xc_audio.c) */
+static char st_flash[96];   /* empty: not loaded (no initialized data: it would take flash) */
+static char st_soc[96];
+
+const char* xc_load_status(int which)
+{
+  const char* s = which ? st_soc : st_flash;
+  return s[0] ? s : "not loaded";
+}
+
+/* the game was loaded from a prebuilt image (src/xc_soc/xc_build_image.py): the two files are not used */
+void xc_load_prebuilt(uint32_t size)
+{
+  snprintf(st_flash, sizeof(st_flash), "not used (prebuilt image, %lu bytes)", (unsigned long)size);
+  snprintf(st_soc, sizeof(st_soc), "not used (prebuilt image)");
+}
+
 /* returns NULL when the image is complete, else the name of the file that is missing or wrong */
 const char* xc_load_image(void)
 {
   uint32_t h[4];
   from_dump = 0;
+  st_flash[0] = 0;
+  st_soc[0] = 0;
 
   file_open((const uint8_t*)XC_FLASH_FILE, FA_READ);
   uint32_t size = file_handle.fsize;
+  int fr = file_res;
   file_close();
   printf("XC: %s %lu\n", XC_FLASH_FILE, size);
-  if(file_res || size != 0x1000000u) return XC_FLASH_FILE;
-  if(!offload(XC_FLASH_FILE, 0x020000u, 0xCE0000u, 0x020000u)) return XC_FLASH_FILE;
-  if(!offload(XC_FLASH_FILE, 0x000000u, 0x020000u, 0xD00000u)) return XC_FLASH_FILE;
-  if(sram_readshort(psram_of(XC_LAUNCH_CORE1)) != 0x4905) {
-    printf("XC: unknown RP2040 build\n");
+  if(fr) {
+    snprintf(st_flash, sizeof(st_flash), "FAILED: cannot open (FatFs error %d)", fr);
     return XC_FLASH_FILE;
   }
+  if(size != 0x1000000u) {
+    snprintf(st_flash, sizeof(st_flash), "FAILED: %lu bytes, expected 16777216 (16 MB dump)", (unsigned long)size);
+    return XC_FLASH_FILE;
+  }
+  if(!offload(XC_FLASH_FILE, 0x020000u, 0xCE0000u, 0x020000u)
+     || !offload(XC_FLASH_FILE, 0x000000u, 0x020000u, 0xD00000u)) {
+    snprintf(st_flash, sizeof(st_flash), "FAILED: read error (FatFs error %d)", (int)file_res);
+    return XC_FLASH_FILE;
+  }
+  if(sram_readshort(psram_of(XC_LAUNCH_CORE1)) != 0x4905) {
+    printf("XC: unknown RP2040 build\n");
+    strcpy(st_flash, "FAILED: not the Xeno Crisis SNES v1.00 firmware");
+    return XC_FLASH_FILE;
+  }
+  strcpy(st_flash, "loaded OK (16 MB, Xeno Crisis SNES v1.00)");
 
   file_open((const uint8_t*)XC_SOC_FILE, FA_READ);
-  if(!file_res) file_readblock(h, 0, 16);
+  fr = file_res;
+  if(!fr) file_readblock(h, 0, 16);
   file_close();
-  if(file_res || h[0] != XC_SOC_MAGIC || h[1] != 1) return XC_SOC_FILE;
-  if(!offload(XC_SOC_FILE, 0x200u, 0x8000u, 0xD20000u)) return XC_SOC_FILE;
+  if(fr) {
+    snprintf(st_soc, sizeof(st_soc), "FAILED: cannot open (FatFs error %d)", fr);
+    return XC_SOC_FILE;
+  }
+  if(file_res || h[0] != XC_SOC_MAGIC || h[1] != 1) {
+    strcpy(st_soc, "FAILED: bad header (not an xc_soc.bin, or a different version)");
+    return XC_SOC_FILE;
+  }
+  if(!offload(XC_SOC_FILE, 0x200u, 0x8000u, 0xD20000u)) {
+    snprintf(st_soc, sizeof(st_soc), "FAILED: read error (FatFs error %d)", (int)file_res);
+    return XC_SOC_FILE;
+  }
 
   /* redirect the firmware functions (patch table after the additions' header) */
   file_open((const uint8_t*)XC_SOC_FILE, FA_READ);
   file_readblock(h, 0x4200u, 16);
   if(file_res || h[0] != XC_FW_MAGIC || h[1] < 2 || h[3] > 256) {
     file_close();
+    strcpy(st_soc, "FAILED: bad patch table (xc_soc.bin from another build?)");
     return XC_SOC_FILE;
   }
   uint32_t count = h[3];
@@ -130,6 +174,7 @@ const char* xc_load_image(void)
   if(file_readblock(h, t, 8) != 8 || h[0] != XC_MK2P_MAGIC || h[1] > 16) {
     file_close();
     printf("XC: xc_soc.bin has no mk2 table\n");
+    strcpy(st_soc, "FAILED: no mk2 table (xc_soc.bin older than the mk2 firmware)");
     return XC_SOC_FILE;
   }
   for(uint32_t i = 0; i < h[1]; i++)
@@ -137,8 +182,12 @@ const char* xc_load_image(void)
   count += h[1];
 #endif
   file_close();
-  if(file_res) return XC_SOC_FILE;
+  if(file_res) {
+    snprintf(st_soc, sizeof(st_soc), "FAILED: read error in the patch table (FatFs error %d)", (int)file_res);
+    return XC_SOC_FILE;
+  }
   printf("XC: image ok, %lu patches\n", count);
+  snprintf(st_soc, sizeof(st_soc), "loaded OK (%lu patches)", (unsigned long)count);
   from_dump = 1;
   return NULL;
 }

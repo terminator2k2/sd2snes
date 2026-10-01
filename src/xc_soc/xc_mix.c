@@ -123,7 +123,7 @@ static void music_after_decode(int have_decode, int32_t ret);
 static void music_end(void);
 static void mix(void);
 
-/* counters for the MCU's log (MSU-1 core: xcaudio.txt); at 0x20040000 = SRAM chip 0x48000 (xc_mix.ld) */
+/* counters for the MCU's log (MSU-1 core: xc_debug.txt); at 0x20040000 = SRAM chip 0x48000 (xc_mix.ld) */
 struct xc_dbg {
 	uint32_t magic;          /* "XMIX" once installed */
 	uint32_t mode;           /* bit 0: MSU-1 mode; bits 15:8 phase, 23:16 ms_state */

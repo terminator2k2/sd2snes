@@ -28,14 +28,17 @@ void xc_run(uint8_t run);   /* release (1) / hold (0) the soft CPU; release once
 void xc_audio_init(void);   /* call when a Xeno Crisis cartridge is started */
 void xc_audio_poll(void);   /* call from the main loop while the game runs; returns quickly when idle */
 void xc_audio_service(void);/* same, from inside long MCU jobs (FPGA deselected); does nothing when no game runs */
-void xc_audio_report(void); /* when the game is left: timing statistics to the UART and /sd2snes/xcaudio.txt */
+void xc_audio_report(void); /* when the game is left: timing statistics to the UART and /sd2snes/xc_debug.txt */
+void xc_debug_loaded(void); /* after loading: /sd2snes/xc_debug.txt with the load results (core, both files) */
 extern uint32_t xc_audio_packets, xc_audio_errors;
 
 /* xc_load.c: loading a 128 KB kernel ROM builds the image from /sd2snes/xenocrisis_rp2040.bin + /sd2snes/xc_soc.bin */
 const char* xc_load_image(void);   /* NULL when done, else the name of the missing / wrong file */
 void xc_load_dump_save(void);      /* no .srm: seed the save RAM from the dump's save area */
+void xc_load_prebuilt(uint32_t size);   /* the ROM file was a prebuilt image: the two files are not used */
+const char* xc_load_status(int which);  /* 0: xenocrisis_rp2040.bin, 1: xc_soc.bin ("loaded OK ...", "FAILED: ...") */
 #ifdef XC_MSU_DIAG
-void xc_msu_log(const char* why);         /* MSU-1 core: diagnostics to xcaudio.txt (diagnostic build) */
+void xc_msu_log(const char* why);         /* MSU-1 core: diagnostics to xc_debug.txt (diagnostic build) */
 extern uint32_t xc_msu_mcu[4];
 #endif
 int xc_msu_pack(const uint8_t* filename); /* <rom>.msu and fpga_xc_msu present: use the MSU-1 core */

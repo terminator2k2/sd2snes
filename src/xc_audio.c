@@ -21,8 +21,11 @@
  * The decoder is never reset between tracks (the firmware doesn't either).
  *
  * Statistics (DWT cycle counter): service time per packet, decode time, poll gaps, and how often the mixer
- * was already waiting for the next packet. Printed on the UART and written to /sd2snes/xcaudio.txt every
+ * was already waiting for the next packet. Printed on the UART and written to /sd2snes/xc_debug.txt every
  * 1,500 packets (30 s of music) and when the game is left (long reset, reset to menu: xc_audio_report()).
+ * xc_debug.txt (it was xcaudio.txt) starts with the load results: the FPGA core, and whether
+ * xenocrisis_rp2040.bin and xc_soc.bin loaded (xc_load.c); it is first written right after loading
+ * (xc_debug_loaded()), so it is there even when the game does not start.
  */
 #include <string.h>
 #include "config.h"
@@ -204,32 +207,59 @@ static int format_stats(char* b, int size)
 	return n;
 }
 
-/* when the game is left: statistics to the UART and to /sd2snes/xcaudio.txt */
 static char stats_buf[1024] IN_AHBRAM;
 
+/* the load results, at the top of every xc_debug.txt */
+static int format_load(char* b, int size)
+{
+	int n = snprintf(b, size,
+		"FPGA core: %s\r\n"
+		"xenocrisis_rp2040.bin: %s\r\n"
+		"xc_soc.bin: %s\r\n",
+		romprops.fpga_conf ? (const char*)romprops.fpga_conf : "(none)", xc_load_status(0), xc_load_status(1));
+	return (n < 0 || n >= size) ? size - 1 : n;
+}
 
-/* statistics to the UART and to /sd2snes/xcaudio.txt (rewritten each time) */
+/* stats_buf (n bytes) to /sd2snes/xc_debug.txt (rewritten each time) */
+static void write_file(int n)
+{
+#ifndef XC_HOST_TEST
+	FIL f;
+	UINT bw = 0;
+	FRESULT r = f_open(&f, "/sd2snes/xc_debug.txt", FA_WRITE | FA_CREATE_ALWAYS);
+	if(r == FR_OK) {
+		r = f_write(&f, stats_buf, n, &bw);
+		FRESULT rc = f_close(&f);
+		if(r == FR_OK) r = rc;
+	}
+	if(r != FR_OK) printf("xc_debug.txt: error %d\n", (int)r);
+#else
+	(void)n;
+#endif
+}
+
+void xc_debug_loaded(void)
+{
+	int n = snprintf(stats_buf, sizeof(stats_buf), "[game loaded]\r\n");
+	if(n < 0 || n >= (int)sizeof(stats_buf)) n = 0;
+	n += format_load(stats_buf + n, sizeof(stats_buf) - n);
+	printf("%s", stats_buf);
+	write_file(n);
+}
+
+/* the load results and the statistics to the UART and to /sd2snes/xc_debug.txt */
 static void write_log(const char* why)
 {
 	uint32_t t0 = XC_CYCLES();
 	int n = snprintf(stats_buf, sizeof(stats_buf), "[%s #%lu, last write %lu ms]\r\n", why,
 		(unsigned long)++log_writes, (unsigned long)log_ms);
 	if(n < 0 || n >= (int)sizeof(stats_buf)) n = 0;
+	n += format_load(stats_buf + n, sizeof(stats_buf) - n);
 	n += format_stats(stats_buf + n, sizeof(stats_buf) - n);
 	printf("%s", stats_buf);
+	write_file(n);
 #ifndef XC_HOST_TEST
-	FIL f;
-	UINT bw = 0;
-	FRESULT r = f_open(&f, "/sd2snes/xcaudio.txt", FA_WRITE | FA_CREATE_ALWAYS);
-	if(r == FR_OK) {
-		r = f_write(&f, stats_buf, n, &bw);
-		FRESULT rc = f_close(&f);
-		if(r == FR_OK) r = rc;
-	}
-	if(r != FR_OK) printf("xcaudio.txt: error %d\n", (int)r);
 	log_ms = (XC_CYCLES() - t0) / (XC_CYC_PER_US * 1000u);
-#else
-	(void)n;
 #endif
 }
 

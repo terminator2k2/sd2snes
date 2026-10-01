@@ -816,6 +816,7 @@ if(cfg_is_onechip_transient_fixes() && !is_menu) {
     romprops.fpga_features |= FEAT_CMD_UNLOCK;
   }
 #endif
+
 }
 
 /* Chip BIOSes and firmware blobs the staged ROM needs: BS-X, Sufami Turbo, DSPx.
@@ -1631,10 +1632,15 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
 #ifdef XC_SUPPORT
   /* Xeno Crisis: build the complete image from the 128 KB SNES ROM.
      Larger prebuilt images do not require rebuilding. */
-  if (romprops.has_xc && c.filesize == 0x20000) {
-    const char *missing = xc_load_image();
-    if (missing) {
-      return load_abort_missing(flags, MENU_ERR_SUPPLFILE, missing);
+  if (romprops.has_xc) {
+    if (c.filesize == 0x20000) {
+      const char *missing = xc_load_image();
+      xc_debug_loaded();
+      if (missing) {
+        return load_abort_missing(flags, MENU_ERR_SUPPLFILE, missing);
+      }
+    } else {
+      xc_debug_loaded();
     }
   }
 #endif
