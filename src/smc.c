@@ -36,6 +36,7 @@
 #include "memory.h"
 #include "sufami.h"
 #include "bootleg.h"
+#include "xc_audio.h"   /* XC_SUPPORT */
 
 extern cfg_t CFG;
 snes_romprops_t romprops;
@@ -425,15 +426,19 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
          Saves use the RP2040 flash save area, mapped to the
          beginning of SRAM (32 KB .srm).
 
-         Both MK3 MCU variants are supported:
-         STM32F401 (firmware.stm): gameplay, sound effects and Opus music.
-         LPC1756 (firmware.im3): gameplay and sound effects, without music. */
-#ifdef CONFIG_MK3
+         MK3 STM32F401 supports gameplay, sound effects and Opus music.
+         MK3 LPC1756 supports gameplay and sound effects without music.
+         MK2 uses fpga_xc_mk2.bit with MSU-1 music support. */
+#ifdef XC_SUPPORT
       else if (header->map == 0x30 && header->carttype == 0x63
                && header->maker[0] == 'B' && header->maker[1] == 'M'
                && !memcmp(header->gamecode, "XCRI", 4)) {
         props->has_xc = 1;
+#ifdef CONFIG_MK2
+        props->fpga_conf = FPGA_XC_MK2;
+#else
         props->fpga_conf = FPGA_XC;
+#endif
         header->ramsize = 5;
       }
 #endif
