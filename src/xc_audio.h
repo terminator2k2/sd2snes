@@ -36,7 +36,8 @@ extern uint32_t xc_audio_packets, xc_audio_errors;
 const char* xc_load_image(void);   /* NULL when done, else the name of the missing / wrong file */
 void xc_load_dump_save(void);      /* no .srm: seed the save RAM from the dump's save area */
 void xc_load_prebuilt(uint32_t size);   /* the ROM file was a prebuilt image: the two files are not used */
-const char* xc_load_status(int which);  /* 0: xenocrisis_rp2040.bin, 1: xc_soc.bin ("loaded OK ...", "FAILED: ...") */
+const char* xc_load_status(int which);  /* 0: xenocrisis_rp2040.bin, 1: xc_soc.bin ("loaded OK ...", "FAILED: ..."), 2: MSU-1 pack */
+void xc_load_msu_scan(const uint8_t* filename);  /* look for <rom>.msu and <rom>-1..26.pcm (for xc_debug.txt) */
 #ifdef XC_MSU_DIAG
 void xc_msu_log(const char* why);         /* MSU-1 core: diagnostics to xc_debug.txt (diagnostic build) */
 extern uint32_t xc_msu_mcu[4];

@@ -94,10 +94,45 @@ static int patch_entry(uint32_t off)
 static char st_flash[96];   /* empty: not loaded (no initialized data: it would take flash) */
 static char st_soc[96];
 
+static char st_msu[96];
+
 const char* xc_load_status(int which)
 {
-  const char* s = which ? st_soc : st_flash;
-  return s[0] ? s : "not loaded";
+  const char* s = which == 2 ? st_msu : which ? st_soc : st_flash;
+  return s[0] ? s : (which == 2 ? "not checked" : "not loaded");
+}
+
+/* the MSU-1 pack next to the ROM, for xc_debug.txt: <rom>.msu and the game's 26 tracks <rom>-<n>.pcm */
+void xc_load_msu_scan(const uint8_t* filename)
+{
+  char name[260];
+  const char* dot = strrchr((const char*)filename, '.');
+  size_t n = dot ? (size_t)(dot - (const char*)filename) : strlen((const char*)filename);
+  if(n > sizeof(name) - 8) { strcpy(st_msu, "not checked (path too long)"); return; }
+  memcpy(name, filename, n);
+  strcpy(name + n, ".msu");
+  file_open((const uint8_t*)name, FA_READ);
+  file_close();
+  if(file_res) {
+    file_res = FR_OK;
+    const char* base = strrchr(name, '/');
+    snprintf(st_msu, sizeof(st_msu), "not found (%.60s)", base ? base + 1 : name);
+    return;
+  }
+  uint32_t tracks = 0, first_missing = 0;
+  for(uint32_t t = 1; t <= 26; t++) {
+    snprintf(name + n, sizeof(name) - n, "-%lu.pcm", (unsigned long)t);
+    file_open((const uint8_t*)name, FA_READ);
+    file_close();
+    if(!file_res) tracks++;
+    else if(!first_missing) first_missing = t;
+    file_res = FR_OK;
+  }
+  if(first_missing)
+    snprintf(st_msu, sizeof(st_msu), ".msu found, %lu of 26 tracks (.pcm), first missing: %lu",
+             (unsigned long)tracks, (unsigned long)first_missing);
+  else
+    snprintf(st_msu, sizeof(st_msu), ".msu found, all 26 tracks (.pcm)");
 }
 
 /* the game was loaded from a prebuilt image (src/xc_soc/xc_build_image.py): the two files are not used */

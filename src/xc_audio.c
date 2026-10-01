@@ -215,8 +215,10 @@ static int format_load(char* b, int size)
 	int n = snprintf(b, size,
 		"FPGA core: %s\r\n"
 		"xenocrisis_rp2040.bin: %s\r\n"
-		"xc_soc.bin: %s\r\n",
-		romprops.fpga_conf ? (const char*)romprops.fpga_conf : "(none)", xc_load_status(0), xc_load_status(1));
+		"xc_soc.bin: %s\r\n"
+		"MSU-1 pack: %s\r\n",
+		romprops.fpga_conf ? (const char*)romprops.fpga_conf : "(none)", xc_load_status(0), xc_load_status(1),
+		xc_load_status(2));
 	return (n < 0 || n >= size) ? size - 1 : n;
 }
 

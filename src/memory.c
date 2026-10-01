@@ -792,6 +792,7 @@ static void load_set_features(const load_ctx_t *c) {
       }
     }
   }
+
 if(cfg_is_onechip_transient_fixes() && !is_menu) {
     romprops.fpga_features |= FEAT_2100;
   }
@@ -814,6 +815,7 @@ if(cfg_is_onechip_transient_fixes() && !is_menu) {
      load used to drop it here.) */
   if(sgb_romprops.has_sgb && sgb_romprops.core_is_gbc) {
     romprops.fpga_features |= FEAT_CMD_UNLOCK;
+
   }
 #endif
 
@@ -1635,11 +1637,13 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   if (romprops.has_xc) {
     if (c.filesize == 0x20000) {
       const char *missing = xc_load_image();
+      xc_load_msu_scan(filename);
       xc_debug_loaded();
       if (missing) {
         return load_abort_missing(flags, MENU_ERR_SUPPLFILE, missing);
       }
     } else {
+      xc_load_msu_scan(filename);
       xc_debug_loaded();
     }
   }
