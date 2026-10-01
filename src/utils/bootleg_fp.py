@@ -31,6 +31,10 @@ KNOWN = {
     0xCDB590E4: ("BOOTLEG_BITSWAP40", "Marvel Super Heroes vs Street Fighter"),
     0x6C303FC9: ("BOOTLEG_KOF98   ", "King of Fighters '98"),
     0xC97D1D7B: ("BOOTLEG_CONSTANT", "Soul Blade"),
+    0x45874D3D: ("BOOTLEG_CONSTANT", "Hercules"),
+    0x5BBA4EB3: ("BOOTLEG_CONSTANT", "Dragon Ball Z - Final Bout"),
+    0xDD7AFCB9: ("BOOTLEG_CONSTANT", "Dragon Ball Z - Final Bout (sound restored)"),
+    0x51EEB811: ("BOOTLEG_CONSTANT", "Dragon Ball Z - Final Bout (old partial repair)"),
     0x066687CA: ("BOOTLEG_ALU     ", "Tekken 2"),
 }
 

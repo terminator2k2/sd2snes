@@ -59,7 +59,10 @@ static const bootleg_entry_t bootleg_tbl[] = {
   { 0x40242231, 0xFA8C7F16, 0x200000, BOOTLEG_BITSWAP  },  /* X-Men vs. Street Fighter */
   { 0xBAD1D9B8, 0x3BD84207, 0x200000, BOOTLEG_BITSWAP  },  /* Squirrel (verified in emulation) */
   /* Soul Blade constant pattern */
-  { 0xC97D1D7B, 0x100B21AC, 0x300000, BOOTLEG_CONSTANT },
+  { 0xC97D1D7B, 0x100B21AC, 0x300000, BOOTLEG_CONSTANT },  /* Soul Blade */
+  { 0x45874D3D, 0xF0BA418B, 0x200000, BOOTLEG_CONSTANT },  /* Hercules (verified in emulation) */
+  { 0x5BBA4EB3, 0x0D223726, 0x200000, BOOTLEG_CONSTANT },  /* Dragon Ball Z Final Bout (verified in emulation; dump lacks banks 07-0A) */
+  { 0xDD7AFCB9, 0x0D223726, 0x200000, BOOTLEG_CONSTANT },  /* DBZ Final Bout, sound restored from SF II (utils/repair_dbz_sound.py) */
   /* Tekken 2 ALU/flipflop -- SF EX Plus Alpha uses it too (nocash, nesdev t=15510),
      although fullsnes lists it under bitswap */
   { 0x066687CA, 0x4303973A, 0x200000, BOOTLEG_ALU      },  /* Tekken 2 */
