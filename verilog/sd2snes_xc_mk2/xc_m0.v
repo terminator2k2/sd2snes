@@ -26,7 +26,8 @@
 //
 // Bus: one access at a time, held until bus_ready (which may be combinational for zero wait states).
 //   bus_size 0/1/2 = byte/halfword/word. bus_wdata holds the value in its low bits; bus_rdata must
-//   return the addressed value in its low bits (the bus adapter handles byte lanes). Instruction
+//   return the addressed value in its low bits (bits above a byte / halfword load may be anything: the core
+//   extends bits 7:0 / 15:0 itself; the bus adapter handles byte lanes). Instruction
 //   fetches are word reads with bus_fetch set.
 //
 // Control:

@@ -275,13 +275,13 @@ wire i_look = rd_match & ~i_stale;
 wire d_hit = d_look & (d_hit0 | d_hit1);
 wire i_hit = i_look & (i_hit0 | i_hit1);
 wire [31:0] d_word = d_hit1 ? dq1 : dq0;
-// load data lanes: plain wires, no function. XST (ISE 14.7) shares the arguments of a function that one always
-// block calls twice: lane_out(d_word, ...) and lane_out(32'hFFFFFFFF, ...) in the fast-path block became one
-// circuit, and every byte load from the cache read 0xFF on the mk2 (word loads were right).
-wire [7:0] d_byte = bus_addr[1] ? (bus_addr[0] ? d_word[31:24] : d_word[23:16]) : (bus_addr[0] ? d_word[15:8] : d_word[7:0]);
-wire [31:0] d_lanes = (bus_size == 2'd0) ? {24'd0, d_byte} :
-                      (bus_size == 2'd1) ? {16'd0, bus_addr[1] ? d_word[31:16] : d_word[15:0]} : d_word;
-wire [31:0] empty_lanes = (bus_size == 2'd0) ? 32'h000000FF : (bus_size == 2'd1) ? 32'h0000FFFF : 32'hFFFFFFFF;
+// load data: plain wires, no function. XST (ISE 14.7) built the old lane_out() function, called twice in the fast-path
+// block (cache data and 0xFFFFFFFF for erased flash), as one circuit: every byte load from the cache read 0xFF.
+// Only the low bits matter for byte and halfword loads (xc_m0 zero/sign-extends bits 7:0 or 15:0 itself), so the
+// lanes need no size: the addressed halfword goes to bits 15:0, the addressed byte to bits 7:0; an aligned word
+// comes through unchanged.
+wire [15:0] d_half = bus_addr[1] ? d_word[31:16] : d_word[15:0];
+wire [31:0] d_lanes = {d_word[31:16], d_half[15:8], bus_addr[0] ? d_half[15:8] : d_half[7:0]};
 wire [31:0] i_word = i_hit1 ? iq1 : iq0;
 
 //------------------------------------------------------------------------------
@@ -385,7 +385,7 @@ always @* begin
       fast_rdata = d_lanes;
     end else begin
       case(cls)
-        C_EMPTY: begin fast_ready = 1'b1; fast_rdata = empty_lanes; end
+        C_EMPTY: begin fast_ready = 1'b1; fast_rdata = 32'hFFFFFFFF; end   // erased flash: 0xFF / 0xFFFF / 0xFFFFFFFF
         C_NOP: fast_ready = 1'b1;
         C_APB: begin
           // fixed values (see the header); writes only update clk_ref_src / clk_sys_src
