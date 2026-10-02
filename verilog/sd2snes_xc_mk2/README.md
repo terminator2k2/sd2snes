@@ -1,12 +1,19 @@
-# Xeno Crisis on sd2snes mk2 (fit test core)
+# Xeno Crisis on sd2snes mk2
 
 `sd2snes_xc_mk2` is a complete ISE project for the sd2snes mk2 (Spartan-3 XC3S400), laid out like the other mk2 cores:
 `Makefile`, `sd2snes_xc_mk2.xise` (Verilog macros `MK2 | XC_MSU`), `main.ucf`, `config.vh`, `dcm.v` and the Xilinx
 memory blocks in `ip/mk2`. `make mk2` builds `fpga_xc_mk2.bit`; `make mk2s` runs SmartXplorer.
 
-**State: it fits and meets timing (soft CPU at 20 MHz), the mk2 firmware loads it, the music plays from an MSU-1
-pack and the sound effects are mixed in software. Tested in MesenCE (mk2 mode) and in RTL-in-the-loop simulation
-(below), not yet on hardware.**
+**State: runs on hardware.** It fits and meets timing (soft CPU at 20 MHz), the mk2 firmware loads it, and on a real
+sd2snes mk2 the game plays with music from an MSU-1 pack and the sound effects mixed in software (xc_debug.txt after
+a long session: 649,385 mixer ticks, 998 sound effects, 9 music tracks, no halt). Also tested in MesenCE (mk2 mode)
+and in RTL-in-the-loop simulation (below).
+
+Without an MSU-1 pack the game should run without music: in MesenCE, with the MSU-1 never answering (status stays
+busy, as `msu.v` is without the MCU's MSU-1 loop), it boots through the menus into gameplay. On hardware this is not
+confirmed yet; first reports suggest it does not start without the pack. If so, the cause is on the MCU side
+(without a `.msu` the firmware runs its normal game loop instead of `msu1_loop()`, a path the emulation does not
+cover), not in this core.
 
 - The mk2 MCU firmware (`config-mk2`) detects the cartridge, builds the image like the mk3 firmware (and applies the
   "MK2P" table), and loads `/sd2snes/fpga_xc_mk2.bit`. The SD card needs the same files as on mk3:
@@ -29,7 +36,7 @@ these files and are unchanged.
 | `dcm.v` | `my_dcm` (CLK2 = 24 MHz x 25 / 7 = 85.7 MHz, as in the gsu core) and `soc_dcm` (soft CPU: 24 MHz x 5 / 6 = 20 MHz) |
 | `main.ucf` | the mk2 pinout (as sd2snes_gsu) plus TIG between CLK2 and the soft CPU clock (the paths through `xc_bridge`'s synchronizers) |
 | `xc_m0.v` | soft CPU core: register file in LUT RAM, no ROR/REV16/REVSH, MRS/MSR IPSR/PRIMASK only, no interrupts, no early fetch |
-| `xc_soc.v` | SoC: one 16 KB 2-way write-through cache for code and data, no divider, fixed APB reads, no BRR/tick/NVIC, 40-bit timer, no RAM clear at start, halt address not captured, no adders for the fixed PSRAM offsets |
+| `xc_soc.v` | SoC: one 16 KB 2-way write-through cache for code and data, no divider, fixed APB reads, no BRR/tick/NVIC, 40-bit timer, no RAM clear at start, halt address not captured, no adders for the fixed PSRAM offsets; load byte lanes as plain wires (see "First hardware test") |
 | `xc_cache.v` | cache storage; LRU bits in distributed RAM (no reset: they are only a replacement hint) |
 | `xc_bridge.v` | clock-domain bridge; its two 8 x 32 buffers in distributed RAM |
 | `xc_window.v`, `xc_stream.v` | `$3000` window, descriptor queue 2 entries deep |
@@ -38,6 +45,29 @@ these files and are unchanged.
 | `address.v`, `cheat.v`, `mcu_cmd.v`, `sd_dma.v`, `spi.v` | as in `../sd2snes_xc` |
 
 Block RAM: cache data 8 (one per byte lane and way), cache tags 2, window rings 2, `dac_buf` 1, `snescmd_buf` 1: 14 of 16.
+
+## First hardware test: byte loads read 0xFF (fixed)
+
+The first bitstream that met timing showed a black screen. The soft CPU halted about 1.5 ms after start with the
+firmware panic "Hardware alarm %d already claimed" (code `0x10CD6980`), although the claim bit in the SRAM chip was 0.
+A diagnostic build (the mk2 table sent `panic()` to a routine that records the CPU's view of RAM and runs memory
+tests; the MCU's `XC_MSU_DIAG` build printed the report in `xc_debug.txt`) showed:
+
+- the CPU's view of RAM matched the SRAM chip everywhere (no cache incoherence);
+- word, halfword and byte writes and word reads were right;
+- every byte load read 0xFF: the claim bit looked set, and a spinlock counter that the firmware keeps between 16
+  and 23 was 0x00 (0xFF + 1).
+
+Cause: XST (ISE 14.7) built the function `lane_out()`, which the fast-path block of `xc_soc.v` called twice (for the
+cache data and for the constant 0xFFFFFFFF of erased flash), as one circuit, so byte and halfword loads from the
+cache got the constant. Verilator and Icarus simulate it correctly, which is why none of the simulations showed it.
+The load lanes are now plain wires without a size multiplexer: the addressed halfword goes to bits 15:0 and the
+addressed byte to bits 7:0 (`xc_m0` extends bits 7:0 / 15:0 itself; an aligned word comes through unchanged), and
+erased flash reads 0xFFFFFFFF for every size. This is also smaller than the function; a first fix with a size
+multiplexer no longer fit the device. The APB clock-source writes, which called another function twice in one block,
+use wires too. RTL-in-the-loop with the fix: same results, 0 mismatches in 1.8 million checked reads.
+
+Lesson for this core: avoid calling a Verilog function more than once in the same always block with XST.
 
 ## ISE results so far
 
@@ -75,8 +105,9 @@ shutting down; the run with the mixer did not. In MesenCE, the MSU-1 register wr
 test script: 4 track requests including an intro → loop change, and pauses) are the same as on the mk3 MSU-1 core,
 to within 1 ms.
 
-ISE (last build, 20 MHz): 3,582 of 3,584 slices; all constraints met, CLK2 slack +0.032 ns, soft CPU +0.075 ns
-(worst-case conditions). There is no room left: any addition needs slices freed elsewhere.
+ISE (20 MHz build before the byte-lane fix): 3,582 of 3,584 slices; all constraints met, CLK2 slack +0.032 ns, soft CPU
++0.075 ns (worst-case conditions). The fixed build fits and runs on hardware. There is practically no room left: any
+addition needs slices freed elsewhere.
 
 ## Things to look at in the ISE reports
 
