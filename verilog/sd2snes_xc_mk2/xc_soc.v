@@ -219,15 +219,6 @@ always @* begin
     default: begin be = 4'b1111; wd_lanes = bus_wdata; end
   endcase
 end
-function [31:0] lane_out(input [31:0] w, input [1:0] a, input [1:0] size);
-  begin
-    case(size)
-      2'd0: lane_out = {24'd0, w[{a, 3'b000} +: 8]};
-      2'd1: lane_out = {16'd0, a[1] ? w[31:16] : w[15:0]};
-      default: lane_out = w;
-    endcase
-  end
-endfunction
 
 //------------------------------------------------------------------------------
 // Caches
@@ -284,6 +275,13 @@ wire i_look = rd_match & ~i_stale;
 wire d_hit = d_look & (d_hit0 | d_hit1);
 wire i_hit = i_look & (i_hit0 | i_hit1);
 wire [31:0] d_word = d_hit1 ? dq1 : dq0;
+// load data lanes: plain wires, no function. XST (ISE 14.7) shares the arguments of a function that one always
+// block calls twice: lane_out(d_word, ...) and lane_out(32'hFFFFFFFF, ...) in the fast-path block became one
+// circuit, and every byte load from the cache read 0xFF on the mk2 (word loads were right).
+wire [7:0] d_byte = bus_addr[1] ? (bus_addr[0] ? d_word[31:24] : d_word[23:16]) : (bus_addr[0] ? d_word[15:8] : d_word[7:0]);
+wire [31:0] d_lanes = (bus_size == 2'd0) ? {24'd0, d_byte} :
+                      (bus_size == 2'd1) ? {16'd0, bus_addr[1] ? d_word[31:16] : d_word[15:0]} : d_word;
+wire [31:0] empty_lanes = (bus_size == 2'd0) ? 32'h000000FF : (bus_size == 2'd1) ? 32'h0000FFFF : 32'hFFFFFFFF;
 wire [31:0] i_word = i_hit1 ? iq1 : iq0;
 
 //------------------------------------------------------------------------------
@@ -312,15 +310,12 @@ reg [31:0] spinlocks;
 reg nvic_en, nvic_pend;             // IRQ 26 (mixer tick) only
 reg [1:0] clk_ref_src;              // CLK_REF_CTRL SRC
 reg clk_sys_src;                    // CLK_SYS_CTRL SRC
-// APB write with the RP2040 atomic aliases (addr[13:12]: 0 write, 1 XOR, 2 set, 3 clear)
-function [1:0] apb_alias2(input [1:0] old, input [1:0] v, input [1:0] mode);
-  case(mode)
-    2'd0: apb_alias2 = v;
-    2'd1: apb_alias2 = old ^ v;
-    2'd2: apb_alias2 = old | v;
-    default: apb_alias2 = old & ~v;
-  endcase
-endfunction
+// APB write with the RP2040 atomic aliases (addr[13:12]: 0 write, 1 XOR, 2 set, 3 clear); wires, not a function
+// called twice in one always block (see d_lanes)
+wire [1:0] ref_src_new = (bus_addr[13:12] == 2'd0) ? bus_wdata[1:0] : (bus_addr[13:12] == 2'd1) ? clk_ref_src ^ bus_wdata[1:0] :
+                         (bus_addr[13:12] == 2'd2) ? clk_ref_src | bus_wdata[1:0] : clk_ref_src & ~bus_wdata[1:0];
+wire sys_src_new = (bus_addr[13:12] == 2'd0) ? bus_wdata[0] : (bus_addr[13:12] == 2'd1) ? clk_sys_src ^ bus_wdata[0] :
+                   (bus_addr[13:12] == 2'd2) ? clk_sys_src | bus_wdata[0] : clk_sys_src & ~bus_wdata[0];
 
 // interrupts: IRQ 26 only (dec_irq_tog is not used: the MSU-1 core has no decode interrupt)
 assign exc_req = 1'b0;   // mk2: no interrupts (the mixer runs on the MCU)
@@ -387,10 +382,10 @@ always @* begin
     end else if(use_dc) begin
       if(bus_we) fast_ready = d_look & ((cls != C_RAM) | ~bg_busy);  // mk2 write-through: RAM stores are posted to the SRAM
       else fast_ready = d_hit;
-      fast_rdata = lane_out(d_word, bus_addr[1:0], bus_size);
+      fast_rdata = d_lanes;
     end else begin
       case(cls)
-        C_EMPTY: begin fast_ready = 1'b1; fast_rdata = lane_out(32'hFFFFFFFF, bus_addr[1:0], bus_size); end
+        C_EMPTY: begin fast_ready = 1'b1; fast_rdata = empty_lanes; end
         C_NOP: fast_ready = 1'b1;
         C_APB: begin
           // fixed values (see the header); writes only update clk_ref_src / clk_sys_src
@@ -544,8 +539,8 @@ always @(posedge clk) begin
                 end
                 C_WIN: if(bus_we) win_txaddr <= bus_wdata;           // TX_ADDR (the only fast window access)
                 C_APB: if(bus_we) begin
-                  if(apb_reg == 32'h40008030) clk_ref_src <= apb_alias2(clk_ref_src, bus_wdata[1:0], bus_addr[13:12]);
-                  if(apb_reg == 32'h4000803C) clk_sys_src <= apb_alias2({1'b0, clk_sys_src}, {1'b0, bus_wdata[0]}, bus_addr[13:12]) != 2'd0;
+                  if(apb_reg == 32'h40008030) clk_ref_src <= ref_src_new;
+                  if(apb_reg == 32'h4000803C) clk_sys_src <= sys_src_new;
                 end
                 C_SIO: begin
                   if(bus_addr[11:7] == 5'b00010) begin                   // spinlocks 0x100-0x17C
