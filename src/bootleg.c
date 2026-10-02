@@ -63,6 +63,7 @@ static const bootleg_entry_t bootleg_tbl[] = {
   { 0x45874D3D, 0xF0BA418B, 0x200000, BOOTLEG_CONSTANT },  /* Hercules (verified in emulation) */
   { 0x5BBA4EB3, 0x0D223726, 0x200000, BOOTLEG_CONSTANT },  /* Dragon Ball Z Final Bout (verified in emulation; dump lacks banks 07-0A) */
   { 0xDD7AFCB9, 0x0D223726, 0x200000, BOOTLEG_CONSTANT },  /* DBZ Final Bout, sound restored from SF II (utils/repair_dbz_sound.py) */
+  { 0x51EEB811, 0x0D223726, 0x200000, BOOTLEG_CONSTANT },  /* DBZ Final Bout, earlier partial repair (superseded, #60 wrong) */
   /* Tekken 2 ALU/flipflop -- SF EX Plus Alpha uses it too (nocash, nesdev t=15510),
      although fullsnes lists it under bitswap */
   { 0x066687CA, 0x4303973A, 0x200000, BOOTLEG_ALU      },  /* Tekken 2 */
