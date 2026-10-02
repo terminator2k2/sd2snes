@@ -1,0 +1,254 @@
+diff -ruN cur/celt/celt_decoder.c new/celt/celt_decoder.c
+--- a/celt/celt_decoder.c	2026-10-02 22:51:23.945533811 +0800
++++ b/celt/celt_decoder.c	2026-10-02 22:57:35.028011792 +0800
+@@ -1275,6 +1275,7 @@
+          st->stream_channels = value;
+       }
+       break;
++#ifndef XC_CTL_MIN
+       case CELT_GET_AND_CLEAR_ERROR_REQUEST:
+       {
+          opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -1284,6 +1285,8 @@
+          st->error = 0;
+       }
+       break;
++#endif
++#ifndef XC_CTL_MIN
+       case OPUS_GET_LOOKAHEAD_REQUEST:
+       {
+          opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -1292,6 +1295,7 @@
+          *value = st->overlap/st->downsample;
+       }
+       break;
++#endif
+       case OPUS_RESET_STATE:
+       {
+          int i;
+@@ -1308,6 +1312,7 @@
+          st->skip_plc = 1;
+       }
+       break;
++#ifndef XC_CTL_MIN
+       case OPUS_GET_PITCH_REQUEST:
+       {
+          opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -1316,6 +1321,7 @@
+          *value = st->postfilter_period;
+       }
+       break;
++#endif
+       case CELT_GET_MODE_REQUEST:
+       {
+          const CELTMode ** value = va_arg(ap, const CELTMode**);
+@@ -1338,6 +1344,7 @@
+          *value=st->rng;
+       }
+       break;
++#ifndef XC_CTL_MIN
+       case OPUS_SET_PHASE_INVERSION_DISABLED_REQUEST:
+       {
+           opus_int32 value = va_arg(ap, opus_int32);
+@@ -1348,6 +1355,8 @@
+           st->disable_inv = value;
+       }
+       break;
++#endif
++#ifndef XC_CTL_MIN
+       case OPUS_GET_PHASE_INVERSION_DISABLED_REQUEST:
+       {
+           opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -1358,6 +1367,7 @@
+           *value = st->disable_inv;
+       }
+       break;
++#endif
+       default:
+          goto bad_request;
+    }
+diff -ruN cur/celt/static_modes_fixed.h new/celt/static_modes_fixed.h
+--- a/celt/static_modes_fixed.h	2026-10-02 22:51:23.949398758 +0800
++++ b/celt/static_modes_fixed.h	2026-10-02 22:53:09.878150851 +0800
+@@ -383,6 +383,7 @@
+ 
+ #ifndef FFT_BITREV240
+ #define FFT_BITREV240
++#ifndef XC_FFT_NO_SHIFT1
+ static const opus_int16 fft_bitrev240[240] = {
+ 0, 48, 96, 144, 192, 16, 64, 112, 160, 208, 32, 80, 128, 176, 224,
+ 4, 52, 100, 148, 196, 20, 68, 116, 164, 212, 36, 84, 132, 180, 228,
+@@ -403,6 +404,8 @@
+ };
+ #endif
+ 
++#endif
++
+ #ifndef FFT_BITREV120
+ #define FFT_BITREV120
+ static const opus_int16 fft_bitrev120[120] = {
+@@ -425,6 +428,7 @@
+ 2, 14, 26, 38, 50, 6, 18, 30, 42, 54, 10, 22, 34, 46, 58,
+ 3, 15, 27, 39, 51, 7, 19, 31, 43, 55, 11, 23, 35, 47, 59,
+ };
++
+ #endif
+ 
+ #ifndef FFT_STATE48000_960_0
+@@ -447,6 +451,7 @@
+ 
+ #ifndef FFT_STATE48000_960_1
+ #define FFT_STATE48000_960_1
++#ifndef XC_FFT_NO_SHIFT1
+ static const kiss_fft_state fft_state48000_960_1 = {
+ 240,    /* nfft */
+ 17476,    /* scale */
+@@ -463,6 +468,8 @@
+ };
+ #endif
+ 
++#endif
++
+ #ifndef FFT_STATE48000_960_2
+ #define FFT_STATE48000_960_2
+ static const kiss_fft_state fft_state48000_960_2 = {
+@@ -497,6 +504,7 @@
+ NULL,
+ #endif
+ };
++
+ #endif
+ 
+ #endif
+@@ -881,7 +889,13 @@
+ band_allocation,        /* allocVectors */
+ logN400,        /* logN */
+ window120,      /* window */
++#ifdef XC_FFT_NO_SHIFT1
++/* XC_FFT_NO_SHIFT1: the game only decodes 20 ms frames: long blocks (MDCT shift 0), short blocks (shift 3), and
++   5 ms transition frames at mode switches (shift 2); the FFT for shift 1 (10 ms frames) is left out */
++{1920, 3, {&fft_state48000_960_0, 0, &fft_state48000_960_2, &fft_state48000_960_3, }, mdct_twiddles960},    /* mdct */
++#else
+ {1920, 3, {&fft_state48000_960_0, &fft_state48000_960_1, &fft_state48000_960_2, &fft_state48000_960_3, }, mdct_twiddles960},    /* mdct */
++#endif
+ {392, cache_index50, cache_bits50, cache_caps50},       /* cache */
+ };
+ 
+diff -ruN cur/silk/decoder_set_fs.c new/silk/decoder_set_fs.c
+--- a/silk/decoder_set_fs.c	2026-10-02 22:51:23.955864739 +0800
++++ b/silk/decoder_set_fs.c	2026-10-02 22:52:08.310866735 +0800
+@@ -71,10 +71,15 @@
+         }
+         if( psDec->fs_kHz != fs_kHz ) {
+             psDec->ltp_mem_length = silk_SMULBB( LTP_MEM_LENGTH_MS, fs_kHz );
++#ifndef XC_SILK_WB_ONLY
+             if( fs_kHz == 8 || fs_kHz == 12 ) {
+                 psDec->LPC_order = MIN_LPC_ORDER;
+                 psDec->psNLSF_CB = &silk_NLSF_CB_NB_MB;
+-            } else {
++            } else
++#endif
++            {
++                /* XC_SILK_WB_ONLY: the game's hybrid packets only use SILK wideband (16 kHz); without the
++                   narrowband/mediumband codebook (other rates would decode wrongly, but consistently) */
+                 psDec->LPC_order = MAX_LPC_ORDER;
+                 psDec->psNLSF_CB = &silk_NLSF_CB_WB;
+             }
+diff -ruN cur/src/opus_decoder.c new/src/opus_decoder.c
+--- a/src/opus_decoder.c	2026-10-02 22:51:23.965721574 +0800
++++ b/src/opus_decoder.c	2026-10-02 22:57:35.028748633 +0800
+@@ -830,6 +830,8 @@
+ 
+ #endif
+ 
++/* XC_CTL_MIN: only the requests the decode service (OPUS_GET_FINAL_RANGE, OPUS_RESET_STATE) and the decoder itself
++   use; the others answer OPUS_UNIMPLEMENTED */
+ int opus_decoder_ctl(OpusDecoder *st, int request, ...)
+ {
+    int ret = OPUS_OK;
+@@ -845,6 +847,7 @@
+ 
+    switch (request)
+    {
++#ifndef XC_CTL_MIN
+    case OPUS_GET_BANDWIDTH_REQUEST:
+    {
+       opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -855,6 +858,7 @@
+       *value = st->bandwidth;
+    }
+    break;
++#endif
+    case OPUS_GET_FINAL_RANGE_REQUEST:
+    {
+       opus_uint32 *value = va_arg(ap, opus_uint32*);
+@@ -877,6 +881,7 @@
+       st->frame_size = st->Fs/400;
+    }
+    break;
++#ifndef XC_CTL_MIN
+    case OPUS_GET_SAMPLE_RATE_REQUEST:
+    {
+       opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -887,6 +892,8 @@
+       *value = st->Fs;
+    }
+    break;
++#endif
++#ifndef XC_CTL_MIN
+    case OPUS_GET_PITCH_REQUEST:
+    {
+       opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -900,6 +907,8 @@
+          *value = st->DecControl.prevPitchLag;
+    }
+    break;
++#endif
++#ifndef XC_CTL_MIN
+    case OPUS_GET_GAIN_REQUEST:
+    {
+       opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -910,6 +919,8 @@
+       *value = st->decode_gain;
+    }
+    break;
++#endif
++#ifndef XC_CTL_MIN
+    case OPUS_SET_GAIN_REQUEST:
+    {
+        opus_int32 value = va_arg(ap, opus_int32);
+@@ -920,6 +931,8 @@
+        st->decode_gain = value;
+    }
+    break;
++#endif
++#ifndef XC_CTL_MIN
+    case OPUS_GET_LAST_PACKET_DURATION_REQUEST:
+    {
+       opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -930,6 +943,8 @@
+       *value = st->last_packet_duration;
+    }
+    break;
++#endif
++#ifndef XC_CTL_MIN
+    case OPUS_SET_PHASE_INVERSION_DISABLED_REQUEST:
+    {
+        opus_int32 value = va_arg(ap, opus_int32);
+@@ -940,6 +955,8 @@
+        ret = celt_decoder_ctl(celt_dec, OPUS_SET_PHASE_INVERSION_DISABLED(value));
+    }
+    break;
++#endif
++#ifndef XC_CTL_MIN
+    case OPUS_GET_PHASE_INVERSION_DISABLED_REQUEST:
+    {
+        opus_int32 *value = va_arg(ap, opus_int32*);
+@@ -950,6 +967,7 @@
+        ret = celt_decoder_ctl(celt_dec, OPUS_GET_PHASE_INVERSION_DISABLED(value));
+    }
+    break;
++#endif
+    default:
+       /*fprintf(stderr, "unknown opus_decoder_ctl() request: %d", request);*/
+       ret = OPUS_UNIMPLEMENTED;
