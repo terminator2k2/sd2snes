@@ -76,6 +76,11 @@ uint32_t xc_msu_mcu[4];        /* MSU-1 core, from msu1_loop(): track requests, 
 #endif
 
 static void read_perf(uint32_t* w);
+#ifdef XC_MSU_DIAG
+static char memres[480];
+static uint8_t mem_checked;
+static void mem_check(void);
+#endif
 static void check_soc(void);
 
 static struct {
@@ -186,6 +191,10 @@ static int format_stats(char* b, int size)
 			soc_st, soc_code, soc_addr, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10],
 			m[11], m[12], m[13], m[14], m[15], m[16], m[17],
 			xc_msu_mcu[0], xc_msu_mcu[1], xc_msu_mcu[2], xc_msu_mcu[3]);
+		if((soc_st & 1) && n >= 0 && n < size) {
+			if(!mem_checked) { mem_checked = 1; mem_check(); }
+			n += snprintf(b + n, size - n, "%s", memres);
+		}
 	} else
 #endif
 	n = snprintf(b, size,
@@ -207,7 +216,7 @@ static int format_stats(char* b, int size)
 	return n;
 }
 
-static char stats_buf[1024] IN_AHBRAM;
+static char stats_buf[1536] IN_AHBRAM;
 
 /* the load results, at the top of every xc_debug.txt */
 static int format_load(char* b, int size)
@@ -266,6 +275,47 @@ static void write_log(const char* why)
 }
 
 #ifdef XC_MSU_DIAG
+/* Once the soft CPU has halted: read its RAM back and check what the firmware's start code wrote there.
+   The RP2040 firmware's crt0 copies .data (RAM 0x200000C0-0x20004E93) from flash 0x10CDD2D4 and zeroes .bss
+   (0x20004F00-0x200232BF) before anything else runs. RP2040 RAM 0x20000000 = SRAM chip 0x08000. */
+static void mem_note(char** p, int* left, uint32_t addr, uint8_t exp, uint8_t got)
+{
+	int w = snprintf(*p, *left, " %05lx:%02x>%02x", (unsigned long)(addr & 0xFFFFF), exp, got);
+	if(w > 0 && w < *left) { *p += w; *left -= w; }
+}
+static void mem_check(void)
+{
+	uint8_t a[64], b[64];
+	char* p = memres;
+	int left = sizeof(memres);
+	uint32_t bad = 0, shown = 0;
+	int w = snprintf(p, left, " .data vs flash (addr:flash>ram):");
+	p += w; left -= w;
+	for(uint32_t off = 0; off < 0x4DD4u; off += 64) {
+		uint32_t len = 0x4DD4u - off < 64 ? 0x4DD4u - off : 64;
+		sram_readblock(a, SRAM_SAVE_ADDR + 0x8000u + 0xC0u + off, len);
+		sram_readblock(b, 0xCDD2D4u + off, len);
+		for(uint32_t i = 0; i < len; i++) if(a[i] != b[i]) {
+			bad++;
+			if(shown++ < 6) mem_note(&p, &left, 0x200000C0u + off + i, b[i], a[i]);
+		}
+	}
+	w = snprintf(p, left, " = %lu of 19924 differ\r\n .bss nonzero (addr:0>ram):", (unsigned long)bad);
+	if(w > 0 && w < left) { p += w; left -= w; }
+	bad = 0; shown = 0;
+	for(uint32_t off = 0; off < 0x1E3C0u; off += 64) {
+		sram_readblock(a, SRAM_SAVE_ADDR + 0x8000u + 0x4F00u + off, 64);
+		for(uint32_t i = 0; i < 64; i++) if(a[i]) {
+			bad++;
+			if(shown++ < 6) mem_note(&p, &left, 0x20004F00u + off + i, 0, a[i]);
+		}
+	}
+	sram_readblock(a, SRAM_SAVE_ADDR + 0x8000u + 0x22E68u, 8);
+	w = snprintf(p, left, " = %lu of 123840\r\n claimed @20022e68: %02x %02x %02x %02x %02x %02x %02x %02x\r\n",
+		(unsigned long)bad, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+	(void)w;
+}
+
 /* MSU-1 core (msu1_loop): the log without the decode service */
 void xc_msu_log(const char* why)
 {
