@@ -18,7 +18,7 @@ CFLAGS := -mcpu=cortex-m0plus -mthumb -mfloat-abi=soft -Os -ffreestanding -fno-b
 AFLAGS := -mcpu=cortex-m0plus
 
 FW_OBJ := $(B)/xc_fw_header.o $(B)/xc_mix.o $(B)/xc_shim.o $(B)/xc_mix_entry.o $(B)/xc_div.o $(B)/xc_brr_sw.o $(B)/xc_mix_voice.o $(B)/xc_emit.o
-ROM_OBJ := $(B)/xc_bootrom_tables.o $(B)/xc_bootrom.o $(B)/xc_bootrom_flags.o
+ROM_OBJ := $(B)/xc_bootrom_tables.o $(B)/xc_bootrom.o $(B)/xc_bootrom_flags.o $(B)/xc_bootrom_memcpy.o
 
 all: $(OUT)/xc_soc.bin
 

@@ -33,7 +33,7 @@ together.
 | Function replacements | `xc_shim.c` | `0x10F00000` region | Replacements for firmware functions that depend on RP2040 hardware: the SNES bus layer (PIO + DMA → the `$3000` window FIFOs), `sleep_until`, `puts`/`printf` (→ debug port), `panic`, and the flash write/erase functions (→ the save area, which lives in the cartridge SRAM and is saved as the `.srm` file). |
 | Patch table | `xc_fw_header.c` | `0x10F00000` | The header ("MXCX", version 2) with the list of firmware addresses to redirect. `multicore_launch_core1` becomes `xc_mix_install`, which sets up the mixer. Clock and stdio setup become "return 0". A second table ("MK2P") follows it; only a loader for a core without the SIO hardware divider (sd2snes mk2) applies it. |
 | mk2 mixing | `xc_mix_voice.S`, `xc_brr_sw.S`, `xc_brr_sw.h` | `0x10F00000` region | Mono voice mixing and the BRR encoder in hand-written Thumb assembly, for the mk2 core (see "mk2 mixing" below). |
-| mk2 table | `xc_fw_header.c` | – | After the main table ("MK2P"): the divider functions below, and `multicore_launch_core1` → `xc_mix_install_mk2` (the mixer without interrupts). |
+| mk2 table | `xc_fw_header.c` | – | After the main table ("MK2P", up to 64 entries): the divider functions below, `multicore_launch_core1` → `xc_mix_install_mk2` (the mixer without interrupts), and the 65816 code emitter (`xc_emit.S`, with code patches: kind 3 writes a word). |
 | Software division (mk2 only) | `xc_div.S` | `0x10F00000` region | Replacements for the pico-sdk divider functions (32- and 64-bit, signed and unsigned), for the mk2 core, which has no SIO divider. They give the same results in r0–r3 as the originals, including division by zero. The mk3 cores keep the hardware divider and don't use them. |
 | Register map | `xc_soc.h` | – | The SoC registers the FPGA cores add around the CPU: BRR encoder, decode mailbox / MSU-1 control, tick timer, debug port, `$3000` window, IRQ numbers. |
 
@@ -116,7 +116,7 @@ those frames in the RTL simulation (60 s of play) showed two hot spots that are 
   byte at a time through small nested functions, each pushing registers, so a two-byte instruction cost about 14
   stores. The mk2 table redirects `emit8`, `emit16` and the six opcode helpers (LDA #, LDX #, STA dp, STA abs,
   STX abs, STZ abs) to leaf functions that store only the output bytes and the new length.
-- **`memcpy` between buffers of different alignment** (`rom_memcpy` in `xc_bootrom.c`): copied byte by byte
+- **`memcpy` between buffers of different alignment** (`rom_memcpy`, now `xc_bootrom_memcpy.S`): copied byte by byte
   before; now with word stores (aligned word loads shifted together). This one is in the bootrom, so mk3 gets it
   too (same results, the change only matters for speed).
 
@@ -128,5 +128,33 @@ Both give the same results as the originals (unit tests against the firmware's o
 | game ticks later than one frame | 10 of 3,616 | 3 of 3,671 |
 | frame message to stream post, p95 / p99 / max | 11.1 / 13.5 / 55.9 ms | 9.8 / 11.6 / 41.0 ms |
 
+Second round (same method, frames over 10 ms profiled):
+
+- **`memcpy` by hand** (`xc_bootrom_memcpy.S`): the C version compiled with `-Os` kept copies of its values on the
+  stack, two extra stack stores per 16 bytes in the aligned loop and one per word in the shifting loop. The
+  assembler version has no stack stores in the aligned and short cases and four pushes for the shifting loop
+  (half the stores over all alignments and lengths 0-69, 100, 255, 256, 1000, 1023; same results as the C version).
+- **The emitter's entry points without stack stores**: the veneers of the mk2 table (`push {r0}` ... `pop {r0}`)
+  cost a store per call, and the firmware's one-line wrappers that take the builder from a global
+  (`push {r4, lr}; ...; bl emit; pop {r4, pc}`) two more. The mk2 table now has code patches (kind 3: write a
+  word), which put a veneer `ldr r3, =fn; bx r3` on the eight emitter functions (they clobber r3 anyway) and turn
+  seven wrappers into tail calls without a push. The tile map loops call two wrappers per tile, 14 stores
+  before, 8 now. This makes the table 53 entries long; the mk2 firmware takes up to 64 (16 before) and knows
+  kind 3, so **this `xc_soc.bin` needs the mk2 firmware of the same build**.
+
+RTL simulation, 60 s of play:
+
+| | before | after |
+|---|---|---|
+| frames over 10 ms (frame message to stream post) | 148 | 91 |
+| p95 / p99 / max | 9.80 / 11.64 / 40.95 ms | 9.45 / 10.93 / 33.51 ms |
+| game ticks later than one frame | 3 of 3,671 | 3 of 3,679 |
+
+What is left in the slow frames is mostly the game's own code, and waiting in `xc_bus_send()` until the SNES has
+read the previous part of the stream (the RP2040 firmware also has one part in flight at a time).
+
 Not kept: stopping the mixer while a SNES message is waiting (`RX_LEVEL`). The SNES has bytes waiting most of
-the time, so the mixer kept stopping, the BRR rings stayed less than half full and nothing got faster.
+the time, so the mixer kept stopping, the BRR rings stayed less than half full and nothing got faster. Also not
+kept: mixing only while the rings are less than a quarter full between the SNES's frame message and the stream
+post. The mixer then ran a quarter as long inside those windows, but they got no shorter (p95 9.44 ms): it had
+been filling time spent waiting for the SNES. The encoder's fast mode was needed twice as often.

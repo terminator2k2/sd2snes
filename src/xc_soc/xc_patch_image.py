@@ -44,12 +44,15 @@ def patch(img, blob, split_only=False, mk2=False):
         else:            # movs r0, #0; bx lr
             struct.pack_into('<HH', img, p, 0x2000, 0x4770)
         patched += 1
-    t = 16 + count * 12            # mk2 table: "MK2P", count, {address, target, kind 0} per patch
+    t = 16 + count * 12            # mk2 table: "MK2P", count, {address, target, kind 0 or 3} per patch
     if mk2 and not split_only:
         if len(blob) < t + 8 or struct.unpack_from('<I', blob, t)[0] != 0x50324B4D:
             raise ValueError('the firmware additions have no mk2 table')
         for i in range(struct.unpack_from('<I', blob, t + 4)[0]):
             addr, target, kind = struct.unpack_from('<III', blob, t + 8 + i * 12)
+            if kind == 3:  # code patch: the word itself
+                struct.pack_into('<I', img, addr - FLASH, target)
+                continue
             lit = (addr + 10 + 3) & ~3
             k = (lit - ((addr + 6) & ~3)) // 4
             struct.pack_into('<6H', img, addr - FLASH, 0xB401, 0x4800 | k, 0x4684, 0xBC01, 0x4760, 0xBF00)

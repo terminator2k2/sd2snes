@@ -83,6 +83,8 @@ static int patch_entry(uint32_t off)
     sram_writeblock(&e[1], psram_of(lit), 4);
   } else if(e[2] == 1) {
     sram_writeblock(&e[1], psram_of(addr + 12), 4);  /* existing veneer: new target */
+  } else if(e[2] == 3) {
+    sram_writeblock(&e[1], psram_of(addr), 4);       /* code patch (mk2 table): the word itself */
   } else {
     uint16_t code[2] = { 0x2000, 0x4770 };           /* movs r0, #0; bx lr */
     sram_writeblock(code, psram_of(addr), 4);
@@ -208,12 +210,13 @@ const char* xc_load_image(void)
   for(uint32_t i = 0; i < count; i++)
     if(!patch_entry(0x4210u + i * 12)) break;
 #ifdef CONFIG_MK2
-  /* the mk2 table after it: the pico-sdk divider functions -> software division (the mk2 core has no divider) */
+  /* the mk2 table after it: the pico-sdk divider functions -> software division (the mk2 core has no divider), the
+     mixer from the wait loops, the 65816 code emitter without stack stores (kind 3: code patches) */
   uint32_t t = 0x4210u + count * 12;
-  if(file_readblock(h, t, 8) != 8 || h[0] != XC_MK2P_MAGIC || h[1] > 16) {
+  if(file_readblock(h, t, 8) != 8 || h[0] != XC_MK2P_MAGIC || h[1] > 64) {
     file_close();
     printf("XC: xc_soc.bin has no mk2 table\n");
-    strcpy(st_soc, "FAILED: no mk2 table (xc_soc.bin older than the mk2 firmware)");
+    strcpy(st_soc, "FAILED: no mk2 table or too long (xc_soc.bin and firmware from different builds?)");
     return XC_SOC_FILE;
   }
   for(uint32_t i = 0; i < h[1]; i++)
