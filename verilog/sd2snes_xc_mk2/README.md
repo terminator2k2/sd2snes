@@ -15,8 +15,8 @@ sound effects mixed in software; without a pack it runs without music.
 - SD card: `xenocrisis_rp2040.bin` and `xc_soc.bin` as on mk3, plus this core as `fpga_xc_mk2.bit`; an MSU-1 pack
   next to the ROM for music. **`xc_soc.bin` and the firmware must come from the same build** (the firmware checks
   the patch table and refuses one it can't apply).
-- Linear interpolation in the DAC: To turn it off, define `XC_DAC_NOLINEAR` (project properties → Synthesize → Verilog Macros, next to
-  `MK2 | XC_MSU`). Without it, each sample is held until the next one. Both fit and meet timing.
+- The DAC interpolates linearly. To turn that off, define `XC_DAC_NOLINEAR` (project properties → Synthesize →
+  Verilog Macros, next to `MK2 | XC_MSU`); each sample is then held until the next one. Both fit and meet timing.  
 
 ## How it differs from mk3
 
