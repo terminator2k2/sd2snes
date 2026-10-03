@@ -130,23 +130,22 @@ end
 
 // One channel at a time: the I2S side loads the low half at the falling edge of lrck and the high half at the
 // rising edge, so while lrck is high this computes the low channel and while it is low the high channel. The
-// pipeline (3 stages) has settled long before the edge (256 clocks per half), and the result is the same as two
+// pipeline (4 stages) has settled long before the edge (256 clocks per half), and the result is the same as two
 // parallel channels, with one subtractor, adder, multiplier pair and saturation instead of two (mk2: size).
 wire ch_lo = lrck;
 wire [15:0] c_cur = ch_lo ? s_cur[15:0] : s_cur[31:16];
 `ifdef XC_DAC_LINEAR
-// linear interpolation: prev + (cur - prev) * step / 16
+// linear interpolation: (prev * (16 - step) + cur * step) / 16, which is exactly prev + (cur - prev) * step / 16
+// (prev * 16 is a multiple of 16). Both products are registered, so XST puts the registers into the hard
+// multipliers (MULT18X18S) and the datapath needs no subtractor and no slice flip-flops for them.
 wire [15:0] c_prev = ch_lo ? s_prev[15:0] : s_prev[31:16];
-reg signed [16:0] d;
-reg signed [15:0] p;
-reg [3:0] step_r;
+reg signed [21:0] pa, pb;
 reg signed [15:0] i_s;
-wire signed [21:0] m = d * $signed({1'b0, step_r});
+wire signed [22:0] psum = pa + pb;
 always @(posedge clkin) begin
-  d <= $signed({c_cur[15], c_cur}) - $signed({c_prev[15], c_prev});
-  p <= c_prev;
-  step_r <= step;
-  i_s <= p + m[19:4];   // |prev + (cur - prev) * s/16| stays within 16 bits
+  pa <= $signed(c_prev) * $signed({1'b0, 5'd16 - {1'b0, step}});
+  pb <= $signed(c_cur) * $signed({1'b0, 1'b0, step});
+  i_s <= psum[19:4];   // the weighted sum of two 16-bit samples divided by 16 stays within 16 bits
 end
 `else
 // mk2 (size): no interpolation, each input sample is held until the next one (define XC_DAC_LINEAR for linear
@@ -177,16 +176,17 @@ end
 reg [10:0] vol_target_reg = 11'd0;
 reg [10:0] vol_reg = 11'd0;
 always @(posedge clkin) vol_target_reg <= vol_scaled;
-// ramp volume only on sample boundaries
+// ramp volume only on sample boundaries (one comparator and an equality test)
+wire vol_up = vol_reg < vol_target_reg;
 always @(posedge clkin) begin
-  if(lrck_rising) begin
-    if(vol_reg > vol_target_reg) vol_reg <= vol_reg - 1'b1;
-    else if(vol_reg < vol_target_reg) vol_reg <= vol_reg + 1'b1;
-  end
+  if(lrck_rising && vol_reg != vol_target_reg) vol_reg <= vol_up ? vol_reg + 1'b1 : vol_reg - 1'b1;
 end
 
 // volume and saturation (plain wires: XST builds a function called twice in one block as one circuit)
-wire signed [26:0] vm = i_s * $signed({1'b0, vol_reg});
+// The product is registered (in the hard multiplier, MULT18X18S): multiplier plus saturation in one CLK2 cycle
+// missed timing by 0.76 ns. One more stage of latency is harmless: the result is only loaded at an lrck edge.
+reg signed [26:0] vm;
+always @(posedge clkin) vm <= i_s * $signed({1'b0, vol_reg});
 wire [15:0] vsat = (vm[26:23] == 4'b0000 || vm[26:23] == 4'b1111) ? vm[23:8] : vm[26] ? 16'h8000 : 16'h7fff;
 reg [15:0] v;
 always @(posedge clkin) v <= vsat;
