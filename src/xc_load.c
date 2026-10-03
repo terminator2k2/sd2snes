@@ -116,7 +116,11 @@ void xc_load_msu_scan(const uint8_t* filename)
   if(file_res) {
     file_res = FR_OK;
     const char* base = strrchr(name, '/');
-    snprintf(st_msu, sizeof(st_msu), "not found (%.60s)", base ? base + 1 : name);
+    /* the firmware's printf (printf.c) has no precision ("%.60s" never ends): shorten the name by hand */
+    char shown[61];
+    strncpy(shown, base ? base + 1 : name, sizeof(shown) - 1);
+    shown[sizeof(shown) - 1] = 0;
+    snprintf(st_msu, sizeof(st_msu), "not found (%s)", shown);
     return;
   }
   uint32_t tracks = 0, first_missing = 0;
