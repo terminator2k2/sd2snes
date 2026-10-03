@@ -41,7 +41,7 @@ these files and are unchanged.
 | `xc_bridge.v` | clock-domain bridge; its two 8 x 32 buffers in distributed RAM |
 | `xc_window.v`, `xc_stream.v` | `$3000` window, descriptor queue 2 entries deep |
 | `xc_top.v` | the blocks together, MSU-1 only, no performance counters |
-| `msu.v`, `xc_dac.v`, `xc_msubox.v` | MSU-1 audio (no data port), DAC (Xilinx `dac_buf` ports; sample-and-hold instead of linear interpolation unless `XC_DAC_LINEAR` is defined), soft CPU → MSU-1 registers |
+| `msu.v`, `xc_dac.v`, `xc_msubox.v` | MSU-1 audio (no data port), DAC (Xilinx `dac_buf` ports; sample-and-hold instead of linear interpolation unless `XC_DAC_LINEAR` is defined; one channel at a time through a shared datapath, bit-exact with the two-channel version), soft CPU → MSU-1 registers |
 | `address.v`, `cheat.v`, `mcu_cmd.v`, `sd_dma.v`, `spi.v` | as in `../sd2snes_xc` |
 
 Block RAM: cache data 8 (one per byte lane and way), cache tags 2, window rings 2, `dac_buf` 1, `snescmd_buf` 1: 14 of 16.
