@@ -134,7 +134,13 @@ end
 // parallel channels, with one subtractor, adder, multiplier pair and saturation instead of two (mk2: size).
 wire ch_lo = lrck;
 wire [15:0] c_cur = ch_lo ? s_cur[15:0] : s_cur[31:16];
-`ifdef XC_DAC_LINEAR
+`ifdef XC_DAC_NOLINEAR
+// mk2 (size): no interpolation, each input sample is held until the next one (define XC_DAC_NOLINEAR)
+reg signed [15:0] i_s;
+always @(posedge clkin) begin
+  i_s <= c_cur;
+end
+`else
 // linear interpolation: (prev * (16 - step) + cur * step) / 16, which is exactly prev + (cur - prev) * step / 16
 // (prev * 16 is a multiple of 16). Both products are registered, so XST puts the registers into the hard
 // multipliers (MULT18X18S) and the datapath needs no subtractor and no slice flip-flops for them.
@@ -146,13 +152,6 @@ always @(posedge clkin) begin
   pa <= $signed(c_prev) * $signed({1'b0, 5'd16 - {1'b0, step}});
   pb <= $signed(c_cur) * $signed({1'b0, 1'b0, step});
   i_s <= psum[19:4];   // the weighted sum of two 16-bit samples divided by 16 stays within 16 bits
-end
-`else
-// mk2 (size): no interpolation, each input sample is held until the next one (define XC_DAC_LINEAR for linear
-// interpolation)
-reg signed [15:0] i_s;
-always @(posedge clkin) begin
-  i_s <= c_cur;
 end
 `endif
 
