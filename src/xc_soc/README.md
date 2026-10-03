@@ -105,3 +105,28 @@ what `xc_brr` does in hardware on mk3:
   (s0 only, when the mixer has fallen behind) gives ~1 dB more noise on about 10% of the blocks.
 - **Result** (RTL simulation of the mk2 core at 20 MHz, 60 s of play): 1,487 blocks per second, the game needs
   ~1,490; the mixer takes 24% of the CPU; the left BRR ring was empty in 3 of 59,869 millisecond samples.
+
+### mk2 speed-ups
+
+At 20 MHz, with every store going out to the SRAM chip, some frames take longer than one SNES frame (the game then
+slows down, and the SNES may still be updating the screen when it starts drawing: flicker at the top). Profiling
+those frames in the RTL simulation (60 s of play) showed two hot spots that are cheap to fix in software:
+
+- **The firmware's 65816 code emitter** (`xc_emit.S`): the firmware builds the code it streams to the SNES one
+  byte at a time through small nested functions, each pushing registers, so a two-byte instruction cost about 14
+  stores. The mk2 table redirects `emit8`, `emit16` and the six opcode helpers (LDA #, LDX #, STA dp, STA abs,
+  STX abs, STZ abs) to leaf functions that store only the output bytes and the new length.
+- **`memcpy` between buffers of different alignment** (`rom_memcpy` in `xc_bootrom.c`): copied byte by byte
+  before; now with word stores (aligned word loads shifted together). This one is in the bootrom, so mk3 gets it
+  too (same results, the change only matters for speed).
+
+Both give the same results as the originals (unit tests against the firmware's own functions in an ARM emulator;
+60 screenshots over 60 s of play in MesenCE identical). RTL simulation, 60 s of play, mixer on:
+
+| | before | after |
+|---|---|---|
+| game ticks later than one frame | 10 of 3,616 | 3 of 3,671 |
+| frame message to stream post, p95 / p99 / max | 11.1 / 13.5 / 55.9 ms | 9.8 / 11.6 / 41.0 ms |
+
+Not kept: stopping the mixer while a SNES message is waiting (`RX_LEVEL`). The SNES has bytes waiting most of
+the time, so the mixer kept stopping, the BRR rings stayed less than half full and nothing got faster.

@@ -80,6 +80,20 @@ void* rom_memcpy(void* dst, const void* src, uint32_t n)
 			d += 16; s += 16; n -= 16;
 		}
 		while(n >= 4) { *(uint32_t*)d = *(const uint32_t*)s; d += 4; s += 4; n -= 4; }
+	} else if(n >= 8) {
+		/* source and destination differ in alignment: word stores anyway (aligned words read from the source and
+		   shifted together; it reads at most 3 bytes past the end of the source, in the word holding its last
+		   byte). Every store is an SRAM write on the mk2 core, so this is 4 times fewer than byte by byte. */
+		while((uint32_t)d & 3) { *d++ = *s++; n--; }
+		uint32_t k = (uint32_t)s & 3, r = 8u * k, l = 32u - r;
+		const uint32_t* ws = (const uint32_t*)(s - k);
+		uint32_t cur = *ws++;
+		while(n >= 4) {
+			uint32_t nxt = *ws++;
+			*(uint32_t*)d = (cur >> r) | (nxt << l);
+			cur = nxt;
+			d += 4; s += 4; n -= 4;
+		}
 	}
 	while(n) { *d++ = *s++; n--; }
 	return dst;
