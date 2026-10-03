@@ -9,11 +9,11 @@ sd2snes mk2 the game plays with music from an MSU-1 pack and the sound effects m
 a long session: 649,385 mixer ticks, 998 sound effects, 9 music tracks, no halt). Also tested in MesenCE (mk2 mode)
 and in RTL-in-the-loop simulation (below).
 
-Without an MSU-1 pack the game should run without music: in MesenCE, with the MSU-1 never answering (status stays
-busy, as `msu.v` is without the MCU's MSU-1 loop), it boots through the menus into gameplay. On hardware this is not
-confirmed yet; first reports suggest it does not start without the pack. If so, the cause is on the MCU side
-(without a `.msu` the firmware runs its normal game loop instead of `msu1_loop()`, a path the emulation does not
-cover), not in this core.
+Without an MSU-1 pack the game runs without music (tested on hardware): the soft CPU's MSU-1 requests stay
+unanswered (status busy, as `msu.v` is without the MCU's MSU-1 loop) and the mixer keeps mixing the sound effects.
+An earlier firmware hung while loading in this case: the MSU-1 pack check wrote its "not found" message with
+`%.60s`, and the sd2snes `printf` (`src/printf.c`) has no precision, so it never returned (fixed in `xc_load.c`;
+the mk3 firmware had the same bug).
 
 - The mk2 MCU firmware (`config-mk2`) detects the cartridge, builds the image like the mk3 firmware (and applies the
   "MK2P" table), and loads `/sd2snes/fpga_xc_mk2.bit`. The SD card needs the same files as on mk3:
