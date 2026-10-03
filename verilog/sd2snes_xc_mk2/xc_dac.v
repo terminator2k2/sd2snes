@@ -9,8 +9,8 @@
 // clock (NTSC/PAL), volume ramp and I2S output (mclk = clk/8, lrck = mclk/64, 16 bits per channel).
 //
 // Interpolation: the output steps 16 times per input sample (705.6 kHz, as dac.v's integrator strobes); each
-// step s (0..15) outputs prev + (cur - prev) * s / 16. Both channels are computed in parallel (DSP multipliers)
-// and registered, so the I2S side selects a register by lrck exactly as dac.v selects its integrator.
+// step s (0..15) outputs prev + (cur - prev) * s / 16. The channels are computed one at a time (see ch_lo) with
+// the hard multipliers.
 //////////////////////////////////////////////////////////////////////////////////
 `include "config.vh"
 
@@ -128,31 +128,32 @@ always @(posedge clkin) begin
   if(lrck_rising) dac_address_r_sync <= dac_address_r;
 end
 
+// One channel at a time: the I2S side loads the low half at the falling edge of lrck and the high half at the
+// rising edge, so while lrck is high this computes the low channel and while it is low the high channel. The
+// pipeline (3 stages) has settled long before the edge (256 clocks per half), and the result is the same as two
+// parallel channels, with one subtractor, adder, multiplier pair and saturation instead of two (mk2: size).
+wire ch_lo = lrck;
+wire [15:0] c_cur = ch_lo ? s_cur[15:0] : s_cur[31:16];
 `ifdef XC_DAC_LINEAR
-// linear interpolation, both channels, two register stages
-reg signed [16:0] d_hi, d_lo;
-reg signed [15:0] p_hi, p_lo;
+// linear interpolation: prev + (cur - prev) * step / 16
+wire [15:0] c_prev = ch_lo ? s_prev[15:0] : s_prev[31:16];
+reg signed [16:0] d;
+reg signed [15:0] p;
 reg [3:0] step_r;
-reg signed [15:0] i_hi, i_lo;
-wire signed [21:0] m_hi = d_hi * $signed({1'b0, step_r});
-wire signed [21:0] m_lo = d_lo * $signed({1'b0, step_r});
+reg signed [15:0] i_s;
+wire signed [21:0] m = d * $signed({1'b0, step_r});
 always @(posedge clkin) begin
-  d_hi <= $signed({s_cur[31], s_cur[31:16]}) - $signed({s_prev[31], s_prev[31:16]});
-  d_lo <= $signed({s_cur[15], s_cur[15:0]}) - $signed({s_prev[15], s_prev[15:0]});
-  p_hi <= s_prev[31:16];
-  p_lo <= s_prev[15:0];
+  d <= $signed({c_cur[15], c_cur}) - $signed({c_prev[15], c_prev});
+  p <= c_prev;
   step_r <= step;
-  i_hi <= p_hi + m_hi[19:4];   // |prev + (cur - prev) * s/16| stays within 16 bits
-  i_lo <= p_lo + m_lo[19:4];
+  i_s <= p + m[19:4];   // |prev + (cur - prev) * s/16| stays within 16 bits
 end
-
 `else
 // mk2 (size): no interpolation, each input sample is held until the next one (define XC_DAC_LINEAR for linear
-// interpolation, about 100 LUTs and 70 flip-flops more)
-reg signed [15:0] i_hi, i_lo;
+// interpolation)
+reg signed [15:0] i_s;
 always @(posedge clkin) begin
-  i_hi <= s_cur[31:16];
-  i_lo <= s_cur[15:0];
+  i_s <= c_cur;
 end
 `endif
 
@@ -184,17 +185,11 @@ always @(posedge clkin) begin
   end
 end
 
-reg signed [15:0] v_hi, v_lo;
-wire signed [26:0] vm_hi = i_hi * $signed({1'b0, vol_reg});
-wire signed [26:0] vm_lo = i_lo * $signed({1'b0, vol_reg});
-function [15:0] sat;
-  input signed [26:0] v;
-  sat = (v[26:23] == 4'b0000 || v[26:23] == 4'b1111) ? v[23:8] : v[26] ? 16'h8000 : 16'h7fff;
-endfunction
-always @(posedge clkin) begin
-  v_hi <= sat(vm_hi);
-  v_lo <= sat(vm_lo);
-end
+// volume and saturation (plain wires: XST builds a function called twice in one block as one circuit)
+wire signed [26:0] vm = i_s * $signed({1'b0, vol_reg});
+wire [15:0] vsat = (vm[26:23] == 4'b0000 || vm[26:23] == 4'b1111) ? vm[23:8] : vm[26] ? 16'h8000 : 16'h7fff;
+reg [15:0] v;
+always @(posedge clkin) v <= vsat;
 
 // I2S (as dac.v: lrck high = dac_buf [31:16])
 reg [15:0] smpshift = 16'd0;
@@ -203,7 +198,7 @@ assign sdout = sdout_reg;
 always @(posedge clkin) begin
   if(sclk_falling) begin
     sdout_reg <= smpshift[15];
-    if(lrck_rising | lrck_falling) smpshift <= lrck ? v_hi : v_lo;
+    if(lrck_rising | lrck_falling) smpshift <= v;
     else smpshift <= {smpshift[14:0], 1'b0};
   end
 end
