@@ -64,7 +64,9 @@ So the hot code avoids stores.
 **Mixer.** The mk2 table starts it with `xc_mix_install_mk2`. The firmware's wait loops call `xc_mix_poll()`
 (`xc_mix_entry.S`), which checks without a store whether a tick is due or the left BRR ring has room; only then does
 it switch to the mixer's stack and run the due ticks and two blocks (eight, with the encoder's fast mode, while the
-rings are less than half full). The mixer only runs inside core 0's calls, so core 1 counts as always parked.
+rings are less than half full; 24 while they are less than a quarter full, since busy scenes with many sound effects
+otherwise ran them almost empty, heard as crackling: in the RTL simulation at 22 MHz the fullest drop went from 2
+blocks left to 32, with no change in frame times). The mixer only runs inside core 0's calls, so core 1 counts as always parked.
 
 - Sound effects have the same volume left and right, so one channel is mixed (two 16-bit samples per word),
   encoded once and written to both rings; different volumes fall back to a stereo path in C.

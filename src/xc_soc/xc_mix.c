@@ -690,13 +690,15 @@ void xc_mix_decoded(void)
  * is due or the left BRR ring has room for a block; then it calls xc_mix_poll_body() on the mixer's stack, which
  * runs the due ticks (up to COOP_CATCHUP; after a longer gap the rest are dropped) and mixes up to COOP_BLOCKS
  * blocks (COOP_BLOCKS_BEHIND, and the encoder's fast mode, while the rings are less than half full, e.g. after core
- * 0 was busy for a while). So the mixing fills core 0's waiting time a little at a time (core 0 is held up by that
+ * 0 was busy for a while; COOP_BLOCKS_LOW while they are less than a quarter full: without it, busy scenes with
+ * many sound effects ran the rings almost empty, heard as crackling). So the mixing fills core 0's waiting time a little at a time (core 0 is held up by that
  * much at most), until the rings (~128 ms) are full. Music: the same track logic as mk3 with an MSU-1 pack. Sound effects: mixed as on mk3,
  * BRR-encoded in software (xc_brr_sw.h). Core 1 counts as parked all the time, because the mixer only ever runs
  * inside a call made by core 0 (core 0's flash save waits for Core1Parked in a loop that calls nothing). */
 #define COOP_CATCHUP 16u
 #define COOP_BLOCKS 2u          /* per call: ~0.3 ms at 20 MHz at most */
 #define COOP_BLOCKS_BEHIND 8u   /* per call while the rings are less than half full (~1.2 ms) */
+#define COOP_BLOCKS_LOW 24u     /* per call while the rings are less than a quarter full (~3.5 ms) */
 static uint32_t timer_lo(void) { return *(volatile uint32_t*)0x40054028u; }   /* TIMERAWL */
 
 void xc_mix_poll_body(void)
@@ -710,7 +712,10 @@ void xc_mix_poll_body(void)
 		xc_mix_tick();
 	}
 	if(st.phase == PH_IDLE && !R8(Locks + 0) && !R8(Locks + 1))
-		coop_blocks(R32(BrrLeftFree) > BrrRingSize / 2 ? COOP_BLOCKS_BEHIND : COOP_BLOCKS);
+	{
+		uint32_t fr = R32(BrrLeftFree);
+		coop_blocks(fr > BrrRingSize * 3 / 4 ? COOP_BLOCKS_LOW : fr > BrrRingSize / 2 ? COOP_BLOCKS_BEHIND : COOP_BLOCKS);
+	}
 	dbg.coop_us += timer_lo() - t0;
 	XC_MIX_EVENT = XC_EV_COOP_LEAVE;
 }
