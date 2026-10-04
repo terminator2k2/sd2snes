@@ -24,7 +24,8 @@
 #define FPGA_CMD_XC_PERF_SNAP  (0xc7)  /* snapshot of the FPGA performance counters */
 #define FPGA_CMD_XC_PERF       (0xc8)  /* read: (null), 8 counters (4 bytes LE each), see xc_top.v "perf" */
 
-void xc_run(uint8_t run);   /* release (1) / hold (0) the soft CPU; release once the image and the save are loaded */
+void xc_run(uint8_t run);   /* bit 0: release (1) / hold (0) the soft CPU, once the image and the save are loaded;
+                               bit 1: MSU-1 music (combined core; the other cores ignore it) */
 void xc_audio_init(void);   /* call when a Xeno Crisis cartridge is started */
 void xc_audio_poll(void);   /* call from the main loop while the game runs; returns quickly when idle */
 void xc_audio_service(void);/* same, from inside long MCU jobs (FPGA deselected); does nothing when no game runs */
@@ -42,6 +43,7 @@ void xc_load_msu_scan(const uint8_t* filename);  /* look for <rom>.msu and <rom>
 void xc_msu_log(const char* why);         /* MSU-1 core: diagnostics to xc_debug.txt (diagnostic build) */
 extern uint32_t xc_msu_mcu[4];
 #endif
-int xc_msu_pack(const uint8_t* filename); /* <rom>.msu and fpga_xc_msu present: use the MSU-1 core */
+const uint8_t* xc_select_core(const uint8_t* filename); /* fpga_xc_mk3, fpga_xc_msu (with <rom>.msu) or fpga_xc */
+int xc_msu_music(void);     /* the music comes from the MSU-1 (MSU-1 core, or combined core with <rom>.msu) */
 
 #endif

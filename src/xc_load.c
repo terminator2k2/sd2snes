@@ -234,27 +234,50 @@ const char* xc_load_image(void)
   return NULL;
 }
 
-/* an MSU-1 pack next to the ROM (<rom>.msu, as msu1_check() looks for it) and the MSU-1 core on the card */
-int xc_msu_pack(const uint8_t* filename)
+/* the core for Xeno Crisis and where its music comes from:
+ *   fpga_xc_mk3 on the card:                 the combined core; MSU-1 music if <rom>.msu is next to the ROM,
+ *                                              else Opus (told to the core with XC_RUN, xc_msu_music())
+ *   <rom>.msu and fpga_xc_msu on the card:     the MSU-1 core
+ *   otherwise:                                 fpga_xc (Opus) */
+static uint8_t xc_msu_mode;
+
+static int file_exists(const uint8_t* name)
+{
+  file_open(name, FA_READ);
+  file_close();
+  if(file_res) { file_res = FR_OK; return 0; }
+  return 1;
+}
+
+const uint8_t* xc_select_core(const uint8_t* filename)
 {
   char name[260];
   const char* dot = strrchr((const char*)filename, '.');
   size_t n = dot ? (size_t)(dot - (const char*)filename) : strlen((const char*)filename);
-  if(n > sizeof(name) - 5) return 0;
-  memcpy(name, filename, n);
-  strcpy(name + n, ".msu");
-  file_open((const uint8_t*)name, FA_READ);
-  file_close();
-  if(file_res) { file_res = FR_OK; return 0; }
-  file_open(FPGA_XC_MSU, FA_READ);
-  file_close();
-  if(file_res) {
-    printf("XC: no %s\n", FPGA_XC_MSU);
-    file_res = FR_OK;
-    return 0;
+  int pack = 0;
+  if(n <= sizeof(name) - 5) {
+    memcpy(name, filename, n);
+    strcpy(name + n, ".msu");                     /* as msu1_check() looks for it */
+    pack = file_exists((const uint8_t*)name);
   }
-  printf("XC: MSU-1 %s\n", name);
-  return 1;
+  xc_msu_mode = 0;
+  if(file_exists(FPGA_XC_MK3)) {
+    xc_msu_mode = pack ? 1 : 0;
+    printf("XC: combined core, %s music\n", pack ? "MSU-1" : "Opus");
+    return FPGA_XC_MK3;
+  }
+  if(pack && file_exists(FPGA_XC_MSU)) {
+    xc_msu_mode = 1;
+    printf("XC: MSU-1 %s\n", name);
+    return FPGA_XC_MSU;
+  }
+  if(pack) printf("XC: no %s\n", FPGA_XC_MSU);
+  return FPGA_XC;
+}
+
+int xc_msu_music(void)
+{
+  return xc_msu_mode;
 }
 
 /* no .srm yet: start from the save area of the dump (the saves made on the cartridge) */

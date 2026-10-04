@@ -1527,39 +1527,40 @@ static void load_reconfigure_fpga(const load_ctx_t *c) {
     /* MK2: dedicated Xeno Crisis FPGA core. */
     romprops.fpga_conf = FPGA_XC_MK2;
 #else
-    /* MK3: select the MSU-1 version when a music pack exists. */
-    romprops.fpga_conf = xc_msu_pack(c->filename) ? FPGA_XC_MSU : FPGA_XC;
+    /* MK3: select combined, MSU-1 or Opus core. */
+    romprops.fpga_conf = xc_select_core(c->filename);
+#endif
+
+    /* Xeno soft CPU handles MSU-1. */
+    romprops.fpga_features &= ~FEAT_MSU1;
+#ifndef CONFIG_MK2
+    if(!xc_msu_music()) romprops.has_msu1 = 0;
 #endif
   }
 #endif
+
 #if RECORE_PSRAM_KEEP
-  uint32_t base_addr = c->base_addr;   /* only the fingerprint check below reads it */
+  uint32_t base_addr = c->base_addr;
 #endif
-  uint8_t  flags     = c->flags;
-  /* reconfigure FPGA if necessary */
+  uint8_t flags = c->flags;
+
+  /* Reconfigure FPGA if necessary. */
   if(flags & LOADROM_WAIT_SNES) {
     printf("Checking if ok to reconfigure...");
     while(snes_get_mcu_cmd() != SNES_CMD_FPGA_RECONF);
     printf("OK.\n");
-    /* Tear down the menu SFX HERE, not back at the commit point.  The wait above
-       IS the iris animation running on the SNES (~0.6 s), so letting the DAC keep
-       streaming across it gives the confirm blip its full length for free.  Killing
-       it at the commit point instead used to be masked by the Recents SD write
-       sitting on the critical path; with that moved off, the sound got chopped.
-       This is the LATEST safe point: fpga_pgm() below reconfigures the FPGA out
-       from under the sfxdma engine, which would leave the DAC stuck.
-       LOADROM_WAIT_SNES implies a game load (a menu load never sets it), so the
-       menu's own reload does not come through here. */
+    /* Tear down menu SFX immediately before FPGA reconfiguration. */
     menu_sfx_shutdown();
   }
+
   const uint8_t *base_core = load_base_core(c);
 #ifdef CONFIG_MK2
-  /* the FPGA holds the other flavour of the base core: it has to be swapped */
   uint8_t base_swap = fpga_config != base_core
                       && (fpga_config == FPGA_BASE || fpga_config == FPGA_BASEX);
 #else
   const uint8_t base_swap = 0;
 #endif
+
   if(romprops.fpga_conf || (flags & LOADROM_WITH_FPGA) || base_swap) {
     const uint8_t *fpga_conf = romprops.fpga_conf ? romprops.fpga_conf : base_core;
     printf("reconfigure FPGA with %s...\n", fpga_conf);
@@ -1834,7 +1835,7 @@ void init(uint8_t *filename) {
 
 #ifdef XC_SUPPORT
   /* Xeno Crisis: the image and the save are loaded now; the soft CPU starts with the SNES */
-  if(romprops.has_xc) xc_run(1);
+  if(romprops.has_xc) xc_run(xc_msu_music() ? 3 : 1);
 #endif
 
   /*

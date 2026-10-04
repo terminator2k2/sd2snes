@@ -83,6 +83,7 @@ extern uint8_t fpga_boot_led;
 #define FPGA_XC ((const uint8_t*)"/sd2snes/fpga_xc." FPGA_CONF_EXT)
 #define FPGA_XC_MSU ((const uint8_t*)"/sd2snes/fpga_xc_msu." FPGA_CONF_EXT)
 #define FPGA_XC_MK2 ((const uint8_t*)"/sd2snes/fpga_xc_mk2." FPGA_CONF_EXT)   /* mk2: MSU-1 only */
+#define FPGA_XC_MK3 ((const uint8_t*)"/sd2snes/fpga_xc_mk3." FPGA_CONF_EXT)
 #define FPGA_DSP ((const uint8_t*)"/sd2snes/fpga_dsp." FPGA_CONF_EXT)
 /* Dedicated ST011 core (verilog/sd2snes_st0011): the uPD96050's 16384-word
    program is fetched from the Bus 2 SRAM through a block-RAM cache, which has no
