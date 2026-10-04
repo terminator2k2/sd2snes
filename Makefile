@@ -21,7 +21,6 @@ MK3MENU := m3nu.bin
 FPGAPATH := verilog
 MK2EXT := bit
 MK3EXT := bi3
-
 # Xeno Crisis: MK2 uses xc_mk2; MK3 uses xc and xc_msu.
 # Preserve all existing Ludufre FPGA cores.
 MK2CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb sgb_msu xc_mk2
