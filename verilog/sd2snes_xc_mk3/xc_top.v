@@ -19,7 +19,7 @@ module xc_top #(
   parameter STATS = 1,             // window statistics (simulation); 0 on hardware
   parameter DIDX = 8,              // D-cache: 2^DIDX sets x 2 ways x 32 B (8 = 16 KB)
   parameter IIDX = 8,              // I-cache: 2^IIDX sets x 2 ways x 32 B (8 = 16 KB)
-  parameter MSU = 0                // 1: MSU-1 core (xc_msubox, in ../sd2snes_xc_msu, instead of the Opus decode mailbox);
+  parameter MSU = 0                // 1: MSU-1 only (xc_msubox instead of the Opus decode mailbox);
                                    // 2: combined core (../sd2snes_xc_mk3): both, msu_mode picks one at load time
 ) (
   input clk2,

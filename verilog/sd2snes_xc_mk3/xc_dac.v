@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// xc_dac: MSU-1 audio output for the Xeno Crisis MSU-1 core (fpga_xc_msu.bi3).
+// xc_dac: MSU-1 audio output for the Xeno Crisis core (fpga_xc_mk3.bi3, MSU-1 music).
 //
 // dac.v with the 3-stage CIC interpolator (6 x 64-bit adders, ~2,000 LEs) replaced by linear interpolation
 // between consecutive 44.1 kHz samples, so that the MSU-1 fits next to the soft CPU. Same ports, the same

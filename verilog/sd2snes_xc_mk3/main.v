@@ -10,7 +10,7 @@
 // Target Devices:
 // Tool versions:
 // Description: Master Control FSM
-//              sd2snes_xc: Xeno Crisis (Bitmap Bureau, RP2040 coprocessor) core, derived from sd2snes_gsu.
+//              sd2snes_xc_mk3: Xeno Crisis (Bitmap Bureau, RP2040 coprocessor) core, derived from sd2snes_gsu.
 //              The RP2040 is replaced by xc_top (soft Thumb CPU + $3000 window with DMA + Opus mailbox),
 //              see xc_top.v and SD2SNES_CORE.md. mk3 only.
 //
@@ -308,9 +308,8 @@ sd_dma snes_sd_dma(
 
 assign SD_DMA_TO_ROM = (SD_DMA_STATUS && (SD_DMA_TGT == 2'b00));
 
-// MSU-1 and the audio DAC: only in the Xeno Crisis MSU-1 core (fpga_xc_msu.bi3, `define XC_MSU: the project
-// in ../sd2snes_xc_msu, which builds this main.v) and the combined core (fpga_xc_mk3.bi3, ../sd2snes_xc_mk3,
-// XC_MSU + XC_MK3: Opus or MSU-1, chosen at load time). With the MSU-1 the music comes from a pack: the soft CPU
+// MSU-1 and the audio DAC (`define XC_MSU; with XC_MK3 as well, fpga_xc_mk3.bi3 has both the Opus mailbox and
+// the MSU-1, chosen at load time). With the MSU-1 the music comes from a pack: the soft CPU
 // writes the MSU-1 registers (xc_msubox in xc_top), the SNES does not see them. Its msu.v is audio-only (no
 // 16 KB data buffer), xc_dac.v is dac.v with linear interpolation instead of the CIC (fits next to the soft CPU).
 wire       xc_msu_we;

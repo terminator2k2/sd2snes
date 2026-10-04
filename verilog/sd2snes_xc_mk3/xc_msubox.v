@@ -1,11 +1,11 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// xc_msubox: the MSU-1 core's replacement for xc_decbox (fpga_xc_msu.bi3, `define XC_MSU).
+// xc_msubox: the MSU-1 registers for the soft CPU (next to xc_decbox in fpga_xc_mk3.bi3, xc_top MSU = 2).
 //
 // The music comes from an MSU-1 pack instead of the Opus streams: the soft CPU's mixer turns the game's
 // track starts into MSU-1 register writes (src/xc_soc/xc_mix.c, "MSU-1 mode"). Same place in the soft CPU's
 // address map as the decode mailbox (see src/xc_soc/xc_soc.h):
-//   0x000 CTRL    read: bit 3 = 1 (MSU-1 core; the Opus core reads 0 there). Writes are ignored.
+//   0x000 CTRL    read: bit 3 = 1 (with MSU = 2, xc_top replaces CTRL with the mailbox's and the MCU's choice).
 //   0x010 MSUREG  write: bits 2:0 = MSU-1 register ($2000 + n), bits 15:8 = value (msu.v register write)
 //   0x014 MSUSTAT read: the MSU-1 status byte ($2000 read: data busy, audio busy, repeat, playing, error, 010)
 // Reads take one extra cycle, like the mailbox's.
