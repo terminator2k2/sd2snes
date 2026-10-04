@@ -71,12 +71,7 @@ extern uint8_t fpga_boot_led;
    keeps booting the SGB core).  Selected by gbc_id() through sgb_update_romprops. */
 #define FPGA_GBC ((const uint8_t*)"/sd2snes/fpga_gbc." FPGA_CONF_EXT)
 #define FPGA_BASE ((const uint8_t*)"/sd2snes/fpga_base." FPGA_CONF_EXT)
-
-/* mk2-only variant of the base core (verilog/sd2snes_basex: the same source with BASE_EXT).
-   The Spartan-3 base core leaves the cartridge-specific address decoder extensions out so
-   that it meets timing; this one keeps them: Sufami Turbo, the Gamars window and the BS
-   Memory Pack slot / BS-LoROM remap. Chosen in load_reconfigure_fpga() -- never stored in
-   romprops.fpga_conf, so every "is this the base core" test still sees the base core. */
+/* mk2-only extended base core: Sufami Turbo, Gamars and BS Memory Pack. */
 #define FPGA_BASEX ((const uint8_t*)"/sd2snes/fpga_basex." FPGA_CONF_EXT)
 
 /* Xeno Crisis RP2040 coprocessor cores */

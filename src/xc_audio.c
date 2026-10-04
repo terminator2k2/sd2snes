@@ -72,7 +72,7 @@ static uint32_t log_ms;        /* time the previous log write took */
 static uint32_t soc_code, soc_addr;
 static uint8_t soc_st;         /* last soft CPU status: bit 0 halted, bit 1 running */
 #ifdef XC_MSU_DIAG
-uint32_t xc_msu_mcu[4];        /* MSU-1 core, from msu1_loop(): track requests, last track, ctrl writes, refills */
+uint32_t xc_msu_mcu[4];        /* MSU-1 music, from msu1_loop(): track requests, last track, ctrl writes, refills */
 #endif
 
 static void read_perf(uint32_t* w);
@@ -316,7 +316,7 @@ static void mem_check(void)
 	(void)w;
 }
 
-/* MSU-1 core (msu1_loop): the log without the decode service */
+/* MSU-1 music (msu1_loop): the log without the decode service */
 void xc_msu_log(const char* why)
 {
 	if(!log_writes) { read_perf(xs.perf); log_ms = 0; }
@@ -474,7 +474,7 @@ void xc_audio_poll(void)
 /* for long MCU jobs (SRAM CRC): serve a waiting job; the caller has deselected the FPGA */
 void xc_audio_service(void)
 {
-	if(romprops.has_msu1) { msu1_audio_service(); return; }   /* MSU-1 core: the MSU-1 audio buffer instead */
+	if(romprops.has_msu1) { msu1_audio_service(); return; }   /* MSU-1 music: the MSU-1 audio buffer instead */
 	if(!active) return;
 	in_service = 1;
 	xc_audio_poll();

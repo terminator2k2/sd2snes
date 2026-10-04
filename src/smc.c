@@ -417,18 +417,15 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
         props->dsp_fw = DSPFW_ST0018;
         props->fpga_conf = FPGA_ST0018;
       }
-/* Xeno Crisis (Bitmap Bureau): RP2040 coprocessor.
-         The user can load the 128 KB SNES ROM directly.
-         load_rom() combines it with /sd2snes/xenocrisis_rp2040.bin
-         and /sd2snes/xc_soc.bin using xc_load.c.
-         Prebuilt Xeno Crisis images are also supported.
 
-         Saves use the RP2040 flash save area, mapped to the
-         beginning of SRAM (32 KB .srm).
-
-         MK3 STM32F401 supports gameplay, sound effects and Opus music.
-         MK3 LPC1756 supports gameplay and sound effects without music.
-         MK2 uses fpga_xc_mk2.bit with MSU-1 music support. */
+/* Xeno Crisis (Bitmap Bureau): the cartridge's RP2040 runs the game and streams it to the SNES.
+         The user loads the 128 KB SNES ROM; load_rom() adds /sd2snes/xenocrisis_rp2040.bin and
+         /sd2snes/xc_soc.bin (xc_load.c); an image prebuilt by xc_build_image.py loads as is. Saves are the RP2040's
+         flash save area, which the Xeno Crisis cores keep at the start of the SRAM chip (32 KB .srm).
+         mk3 (fpga_xc_mk3.bi3): music from an MSU-1 pack if there is one, else the STM32F401 (firmware.stm)
+         decodes the game's Opus music; the LPC1756 (firmware.im3) has too little RAM for the Opus decoder, so
+         there the game runs with sound effects only unless there is an MSU-1 pack.
+         mk2: fpga_xc_mk2.bit, MSU-1 only (memory.c chooses the core when the game is loaded). */
 #ifdef XC_SUPPORT
       else if (header->map == 0x30 && header->carttype == 0x63
                && header->maker[0] == 'B' && header->maker[1] == 'M'
@@ -437,7 +434,7 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
 #ifdef CONFIG_MK2
         props->fpga_conf = FPGA_XC_MK2;
 #else
-        props->fpga_conf = FPGA_XC;
+        props->fpga_conf = FPGA_XC_MK3;
 #endif
         header->ramsize = 5;
       }

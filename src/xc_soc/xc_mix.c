@@ -107,7 +107,7 @@ static struct {
 	uint32_t wr;             /* PCM ring position of the packet being decoded */
 	uint32_t expected_range;
 	uint32_t last_range;     /* decoder final range after the last packet */
-	uint32_t msu;            /* MSU-1 core: music from the MSU-1 pack, no decoding */
+	uint32_t msu;            /* MSU-1 music: from the MSU-1 pack, no decoding */
 	uint32_t ms_state;       /* MS_* */
 	uint32_t ms_t;           /* game track (struct address) the MSU-1 track belongs to */
 	uint32_t ms_next_t;      /* loop part to start when the intro track has played out */
@@ -123,7 +123,7 @@ static void music_after_decode(int have_decode, int32_t ret);
 static void music_end(void);
 static void mix(void);
 
-/* counters for the MCU's log (MSU-1 core: xc_debug.txt); at 0x20040000 = SRAM chip 0x48000 (xc_mix.ld) */
+/* counters for the MCU's log (MSU-1 music: xc_debug.txt); at 0x20040000 = SRAM chip 0x48000 (xc_mix.ld) */
 struct xc_dbg {
 	uint32_t magic;          /* "XMIX" once installed */
 	uint32_t mode;           /* bit 0: MSU-1 mode; bits 15:8 phase, 23:16 ms_state */
@@ -140,7 +140,7 @@ static struct xc_dbg dbg __attribute__((section(".bss.xc_dbg"), used));
 #define XC_COOP_MAGIC 0x434F4F50u   /* "COOP" */
 struct { uint32_t magic, next; } xc_mix_coop;
 
-/* ---- MSU-1 mode (fpga_xc_msu.bi3: CTRL bit 3) ----
+/* ---- MSU-1 mode (CTRL bit 3: mk3 core with an MSU-1 pack, mk2 core always) ----
  * The music comes from an MSU-1 pack. The packets are still walked at the same pace (the game's music
  * position, end-of-track and loop logic stay as they are, and core 0 sees the same state), but nothing is
  * decoded or mixed; each track start becomes an MSU-1 track request. Sound effects are mixed as before.
@@ -332,7 +332,7 @@ static void call_begin(void)
 					R32(MusicOffset) = off + length;
 					st.wr = wr;
 					if(st.msu) {
-						/* MSU-1 core: nothing to decode; the packet counts as decoded (480 samples) and its ring
+						/* MSU-1 music: nothing to decode; the packet counts as decoded (480 samples) and its ring
 						   slot paces the music position as before */
 						st.last_range = st.expected_range;
 						music_after_decode(1, 480);
@@ -691,7 +691,7 @@ void xc_mix_decoded(void)
  * runs the due ticks (up to COOP_CATCHUP; after a longer gap the rest are dropped) and mixes up to COOP_BLOCKS
  * blocks (COOP_BLOCKS_BEHIND, and the encoder's fast mode, while the rings are less than half full, e.g. after core
  * 0 was busy for a while). So the mixing fills core 0's waiting time a little at a time (core 0 is held up by that
- * much at most), until the rings (~128 ms) are full. Music: the same track logic as the mk3 MSU-1 core. Sound effects: mixed as on mk3,
+ * much at most), until the rings (~128 ms) are full. Music: the same track logic as mk3 with an MSU-1 pack. Sound effects: mixed as on mk3,
  * BRR-encoded in software (xc_brr_sw.h). Core 1 counts as parked all the time, because the mixer only ever runs
  * inside a call made by core 0 (core 0's flash save waits for Core1Parked in a loop that calls nothing). */
 #define COOP_CATCHUP 16u

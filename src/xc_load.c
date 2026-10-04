@@ -1,10 +1,10 @@
-/* Xeno Crisis on sd2snes: build the sd2snes_xc memory image from the cartridge's two parts at load time.
+/* Xeno Crisis on sd2snes: build the soft CPU's memory image from the cartridge's two parts at load time.
  *
  * The user loads the SNES ROM (the cartridge's 128 KB kernel, "XENOCRISIS", maker BM, game XCRI, chipset $63)
  * like any other game. load_rom() puts it at PSRAM 0; then xc_load_image() adds, from the SD card:
  *
  *   /sd2snes/xenocrisis_rp2040.bin  the RP2040 flash dump (16 MB, supplied by the user, like the DSP or BS-X files)
- *   /sd2snes/xc_soc.bin             the soft CPU support files, shipped with the firmware next to fpga_xc.bi3
+ *   /sd2snes/xc_soc.bin             the soft CPU support files, shipped with the firmware next to fpga_xc_mk3.bi3
  *                                   (mk2: fpga_xc_mk2.bit):
  *                                   replacement bootrom and firmware additions (built with the firmware: src/xc_soc/)
  *
@@ -234,11 +234,8 @@ const char* xc_load_image(void)
   return NULL;
 }
 
-/* the core for Xeno Crisis and where its music comes from:
- *   fpga_xc_mk3 on the card:                 the combined core; MSU-1 music if <rom>.msu is next to the ROM,
- *                                              else Opus (told to the core with XC_RUN, xc_msu_music())
- *   <rom>.msu and fpga_xc_msu on the card:     the MSU-1 core
- *   otherwise:                                 fpga_xc (Opus) */
+/* mk3: the core is always fpga_xc_mk3; the music comes from the MSU-1 if <rom>.msu is next to the ROM (as
+ * msu1_check() looks for it), else from the game's Opus streams (told to the core with XC_RUN, xc_msu_music()) */
 static uint8_t xc_msu_mode;
 
 static int file_exists(const uint8_t* name)
@@ -260,19 +257,9 @@ const uint8_t* xc_select_core(const uint8_t* filename)
     strcpy(name + n, ".msu");                     /* as msu1_check() looks for it */
     pack = file_exists((const uint8_t*)name);
   }
-  xc_msu_mode = 0;
-  if(file_exists(FPGA_XC_MK3)) {
-    xc_msu_mode = pack ? 1 : 0;
-    printf("XC: combined core, %s music\n", pack ? "MSU-1" : "Opus");
-    return FPGA_XC_MK3;
-  }
-  if(pack && file_exists(FPGA_XC_MSU)) {
-    xc_msu_mode = 1;
-    printf("XC: MSU-1 %s\n", name);
-    return FPGA_XC_MSU;
-  }
-  if(pack) printf("XC: no %s\n", FPGA_XC_MSU);
-  return FPGA_XC;
+  xc_msu_mode = pack ? 1 : 0;
+  printf("XC: %s music\n", pack ? "MSU-1" : "Opus");
+  return FPGA_XC_MK3;
 }
 
 int xc_msu_music(void)

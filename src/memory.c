@@ -1527,7 +1527,7 @@ static void load_reconfigure_fpga(const load_ctx_t *c) {
     /* MK2: dedicated Xeno Crisis FPGA core. */
     romprops.fpga_conf = FPGA_XC_MK2;
 #else
-    /* MK3: select combined, MSU-1 or Opus core. */
+    /* MK3: select the appropriate Xeno Crisis core. */
     romprops.fpga_conf = xc_select_core(c->filename);
 #endif
 
@@ -1837,8 +1837,7 @@ void init(uint8_t *filename) {
   /* Xeno Crisis: the image and the save are loaded now; the soft CPU starts with the SNES */
   if(romprops.has_xc) xc_run(xc_msu_music() ? 3 : 1);
 #endif
-
-  /*
+/*
    * Xeno Crisis uses the cheat area of PSRAM.
    * Do not program normal cheats or savestates for this core.
    */

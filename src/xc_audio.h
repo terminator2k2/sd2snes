@@ -6,7 +6,7 @@
 #define XC_AUDIO_H
 #include <stdint.h>
 
-/* Xeno Crisis support in the firmware: mk3 (fpga_xc.bi3, fpga_xc_msu.bi3) and mk2 (fpga_xc_mk2.bit, MSU-1 only) */
+/* Xeno Crisis support in the firmware: mk3 (fpga_xc_mk3.bi3, Opus or MSU-1) and mk2 (fpga_xc_mk2.bit, MSU-1 only) */
 #if defined(CONFIG_MK3) || defined(CONFIG_MK2)
 #define XC_SUPPORT
 #endif
@@ -25,7 +25,7 @@
 #define FPGA_CMD_XC_PERF       (0xc8)  /* read: (null), 8 counters (4 bytes LE each), see xc_top.v "perf" */
 
 void xc_run(uint8_t run);   /* bit 0: release (1) / hold (0) the soft CPU, once the image and the save are loaded;
-                               bit 1: MSU-1 music (combined core; the other cores ignore it) */
+                               bit 1: MSU-1 music (fpga_xc_mk3; fpga_xc_mk2 ignores it) */
 void xc_audio_init(void);   /* call when a Xeno Crisis cartridge is started */
 void xc_audio_poll(void);   /* call from the main loop while the game runs; returns quickly when idle */
 void xc_audio_service(void);/* same, from inside long MCU jobs (FPGA deselected); does nothing when no game runs */
@@ -40,10 +40,10 @@ void xc_load_prebuilt(uint32_t size);   /* the ROM file was a prebuilt image: th
 const char* xc_load_status(int which);  /* 0: xenocrisis_rp2040.bin, 1: xc_soc.bin ("loaded OK ...", "FAILED: ..."), 2: MSU-1 pack */
 void xc_load_msu_scan(const uint8_t* filename);  /* look for <rom>.msu and <rom>-1..26.pcm (for xc_debug.txt) */
 #ifdef XC_MSU_DIAG
-void xc_msu_log(const char* why);         /* MSU-1 core: diagnostics to xc_debug.txt (diagnostic build) */
+void xc_msu_log(const char* why);         /* MSU-1 music: diagnostics to xc_debug.txt (diagnostic build) */
 extern uint32_t xc_msu_mcu[4];
 #endif
-const uint8_t* xc_select_core(const uint8_t* filename); /* fpga_xc_mk3, fpga_xc_msu (with <rom>.msu) or fpga_xc */
-int xc_msu_music(void);     /* the music comes from the MSU-1 (MSU-1 core, or combined core with <rom>.msu) */
+const uint8_t* xc_select_core(const uint8_t* filename); /* mk3: fpga_xc_mk3; MSU-1 music with <rom>.msu */
+int xc_msu_music(void);     /* the music comes from the MSU-1 (<rom>.msu next to the ROM) */
 
 #endif

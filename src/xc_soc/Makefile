@@ -1,4 +1,4 @@
-# xc_soc.bin: the Xeno Crisis soft CPU support file (sd2snes_xc / sd2snes_xc_msu / sd2snes_xc_mk2 cores). Built
+# xc_soc.bin: the Xeno Crisis soft CPU support file (sd2snes_xc_mk3 / sd2snes_xc_mk2 cores). Built
 # with the mk3 and mk2 firmware (src/Makefile) and shipped next to it in /sd2snes/; the firmware loads it with the game (xc_load.c).
 #   make [OUT=dir]   ->  $(OUT)/xc_soc.bin (also xc_fw.bin, xc_bootrom.bin, used by the image tools here)
 #

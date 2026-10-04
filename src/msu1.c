@@ -304,7 +304,7 @@ static void __attribute__((noinline)) msu_audio_end(void) {
 }
 
 #ifdef XC_SUPPORT
-/* Xeno Crisis MSU-1 core: keeps the music going during long MCU jobs (SRAM CRC, save), called from
+/* Xeno Crisis with MSU-1 music: keeps the music going during long MCU jobs (SRAM CRC, save), called from
    xc_audio_service() between their sectors; the caller has deselected the FPGA */
 void msu1_audio_service(void) {
   if(!msu_loop_active) return;

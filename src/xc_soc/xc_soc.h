@@ -22,9 +22,9 @@
 #define XC_DEC_PACKET     ((volatile uint32_t*)(XC_DEC_BASE + 0x100u))   /* 1536 bytes */
 #define XC_DEC_PCM        ((volatile uint32_t*)(XC_DEC_BASE + 0x800u))   /* 480 stereo int16 samples (1920 bytes) */
 
-/* MSU-1 core (fpga_xc_msu.bi3): the same register block, with the mailbox replaced by the MSU-1 audio control.
- * The music comes from an MSU-1 pack on the SD card instead of the Opus decoder. */
-#define   XC_DEC_MSU_MODE 8u   /* CTRL read: bit 3 set on the MSU-1 core (the Opus core reads 0) */
+/* MSU-1 music: the same register block also has the MSU-1 audio control (0x10, 0x14). The music comes from an
+ * MSU-1 pack on the SD card instead of the Opus decoder. */
+#define   XC_DEC_MSU_MODE 8u   /* CTRL read: bit 3 set for MSU-1 music (mk3: set by the MCU with a pack; mk2: always) */
 #define XC_MSU_REG        (*(volatile uint32_t*)(XC_DEC_BASE + 0x10u))  /* write: bits 2:0 register ($2000 + n), 15:8 value */
 #define XC_MSU_STATUS     (*(volatile uint32_t*)(XC_DEC_BASE + 0x14u))  /* read: the MSU-1 status byte ($2000) */
 #define   XC_MSU_ST_DATA_BUSY   0x80u

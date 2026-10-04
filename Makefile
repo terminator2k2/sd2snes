@@ -24,7 +24,7 @@ MK3EXT := bi3
 # Xeno Crisis: MK2 uses xc_mk2; MK3 uses xc and xc_msu.
 # Preserve all existing Ludufre FPGA cores.
 MK2CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb sgb_msu xc_mk2
-MK3CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb st0011 st0018 col20 xc xc_msu
+MK3CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb st0011 st0018 col20 xc_mk3
 
 MK2FPGA := $(foreach C,$(MK2CORES),$(FPGAPATH)/sd2snes_$C/fpga_$C.$(MK2EXT))
 MK3FPGA := $(foreach C,$(MK3CORES),$(FPGAPATH)/sd2snes_$C/fpga_$C.$(MK3EXT))

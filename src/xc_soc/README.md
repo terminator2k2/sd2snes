@@ -1,7 +1,7 @@
 # xc_soc – Xeno Crisis soft CPU support
 
-Xeno Crisis ships on a SNES cartridge with an RP2040 coprocessor. The sd2snes cores (`sd2snes_xc`, `sd2snes_xc_msu`
-on FXPAK Pro / mk3 at about 40 MHz, `sd2snes_xc_mk2` on mk2 at 20 MHz) replace the RP2040 with a soft Cortex-M0
+Xeno Crisis ships on a SNES cartridge with an RP2040 coprocessor. The sd2snes cores (`sd2snes_xc_mk3` on FXPAK Pro / mk3
+at about 40 MHz, `sd2snes_xc_mk2` on mk2 at 20 MHz) replace the RP2040 with a soft Cortex-M0
 that runs the game's own firmware (the flash dump `xenocrisis_rp2040.bin`) from the PSRAM.
 
 That CPU has no RP2040 boot ROM, no second core and none of the PIO/DMA peripherals. The code in this folder fills
@@ -22,7 +22,7 @@ belong to the **Xeno Crisis SNES v1.00** RP2040 firmware; the loader refuses oth
 | Part | Source | Runs at | Purpose |
 |---|---|---|---|
 | Replacement bootrom | `xc_bootrom.c`, `xc_bootrom_memcpy.S`, `xc_bootrom_tables.S`, `xc_bootrom_flags.S`, `xc_bootrom.ld` | `0x00000000` | The boot ROM functions the pico-sdk looks up: tables, bit operations, memset/memcpy, soft float/double (on libgcc). Functions never used in play (sqrt, trig, exp/log) stop with a panic code. |
-| Mixer | `xc_mix.c`, `xc_mix_entry.S`, `xc_mix.ld` | `0x10F00000` (free flash), data and stack in `SCRATCH_X` | Does core 1's work. mk3: a 1 kHz tick and a "packet decoded" interrupt; the MCU decodes the Opus music, `xc_brr` encodes BRR; on the MSU-1 core the music commands go to the MSU-1. mk2: no interrupts, see "mk2" below. |
+| Mixer | `xc_mix.c`, `xc_mix_entry.S`, `xc_mix.ld` | `0x10F00000` (free flash), data and stack in `SCRATCH_X` | Does core 1's work. mk3: a 1 kHz tick and a "packet decoded" interrupt; the MCU decodes the Opus music, `xc_brr` encodes BRR; with an MSU-1 pack the music commands go to the MSU-1. mk2: no interrupts, see "mk2" below. |
 | Function replacements | `xc_shim.c` | `0x10F00000` region | Firmware functions that need RP2040 hardware: the SNES bus layer (→ `$3000` window), `sleep_until`, `puts`/`printf` (→ debug port), `panic`, flash write/erase (→ save area in the cartridge SRAM, saved as `.srm`). |
 | Patch tables | `xc_fw_header.c` | `0x10F00000` | Main table ("MXCX" v2): the firmware addresses to redirect (`multicore_launch_core1` → `xc_mix_install`, clock/stdio setup → "return 0", ...). Then the mk2 table ("MK2P", up to 64 entries), applied only by the mk2 firmware. |
 | mk2 only | `xc_div.S`, `xc_mix_voice.S`, `xc_brr_sw.S`, `xc_brr_sw.h`, `xc_emit.S` | `0x10F00000` region | Software division (no SIO divider on mk2; same r0–r3 as the originals, including division by zero), mixing and BRR encoding in assembly, the faster 65816 code emitter. |

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the sd2snes image for Xeno Crisis (sd2snes_xc core, FXPAK Pro / mk3).
+"""Build the sd2snes image for Xeno Crisis (sd2snes_xc_mk3 core, FXPAK Pro / mk3).
 
 Not needed any more with the current sd2snes firmware: it builds the same image at load time from the 128 KB
 SNES ROM, /sd2snes/xenocrisis_rp2040.bin and /sd2snes/xc_soc.bin (from `make` in this folder, or MesenCE socfw/build.sh); see sd2snes src/xc_load.c.
@@ -7,7 +7,7 @@ An image made by this script still loads (any Xeno Crisis file larger than 128 K
 
     xc_build_image.py <kernel.sfc> <xenocrisis_rp2040.bin> <out.sfc> [--srm out.srm]
 
-The sd2snes MCU loads the whole file into the PSRAM, from address 0. The sd2snes_xc core maps it as:
+The sd2snes MCU loads the whole file into the PSRAM, from address 0. The sd2snes_xc_mk3 core maps it as:
 
     file / PSRAM         contents                                  seen by
     0x000000-0x01FFFF    SNES kernel ROM (128 KB, LoROM)           SNES

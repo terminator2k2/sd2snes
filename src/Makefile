@@ -98,7 +98,7 @@ SRC += spc7110rtc.c
 # Sufami Turbo Slot B autosave.  Linked into every config.
 SRC += sufami.c
 
-# Xeno Crisis (sd2snes_xc core): decode service for the soft CPU, both mk3 MCUs.
+# Xeno Crisis (sd2snes_xc_mk3 core): decode service for the soft CPU, both mk3 MCUs.
 # STM32F401 (firmware.stm): with the Opus decoder, built automatically from the Opus 1.3.1 source in
 # xc_opus/opus-1.3.1 (xc_opus/build.sh; needs bash and patch)
 # LPC1756 (firmware.im3): no Opus (the decoder needs ~26.5 KB of contiguous RAM plus ~11 KB of stack; the LPC1756
