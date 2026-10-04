@@ -22,7 +22,7 @@ sound effects mixed in software; without a pack it runs without music.
 
 MSU-1 only. The mk3 core (`../sd2snes_xc_mk3`) doesn't use these files.
 
-- **No mixer hardware** (tick timer, interrupts, BRR encoder removed for space; see `experiments/`). The MK2P table
+- **No mixer hardware** (tick timer, interrupts and BRR encoder removed for space). The MK2P table
   starts the mixer (`src/xc_soc/xc_mix.c`) without interrupts: the firmware's wait loops call `xc_mix_poll()`, which
   runs the 1 kHz ticks that are due and mixes a block or two while the BRR rings have room. Music requests go to the
   MSU-1 as on mk3; sound effects are mixed and BRR-encoded in software (assembly, see `src/xc_soc/README.md`).
@@ -41,7 +41,7 @@ MSU-1 only. The mk3 core (`../sd2snes_xc_mk3`) doesn't use these files.
 | APB | writes ignored, fixed reads (only CLK_REF/CLK_SYS source kept) | only accessed at start-up |
 | Timer | 40 bits; TIMEHR/TIMELR read the raw counter | only TIMERAWH/TIMERAWL are read |
 | Cache | one 16 KB 2-way write-through cache for code and data | |
-| Other | no early fetch, no performance counters, no RAM clear at start, window descriptor queue 2 deep | `experiments/README.md` |
+| Other | no early fetch, no performance counters, no RAM clear at start, window descriptor queue 2 deep | size; checked in the RTL-in-the-loop runs |
 
 The MK2P table sits after the main table, so the same `xc_soc.bin` works on mk3 (whose firmware ignores it).
 
