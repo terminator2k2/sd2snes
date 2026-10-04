@@ -4,7 +4,7 @@ A soft Cortex-M0 in the FPGA runs the cartridge's RP2040 firmware on the sd2snes
 `fpga_xc_mk3.bi3`, plays the music either from the game's Opus streams (decoded by the MCU) or from an MSU-1 pack;
 the firmware chooses when the game loads. The mk2 port is in [`../sd2snes_xc_mk2`](../sd2snes_xc_mk2/README.md).
 
-**Status: runs on hardware** (FXPAK Pro, STM32 firmware), with Opus music and with an MSU-1 pack; saves work. Fits and meets
+**Status: runs on hardware** (FXPAK Pro, STM32 firmware), with Opus music and with an MSU-1 pack; saves, reset to menu and long reset work. Fits and meets
 timing in Quartus 25.1 (94% of the logic, 51 of 56 M9K; soft CPU 40.25 MHz +1.19 ns, CLK2 85.87 MHz +1.11 ns).
 
 **Music:** with `<rom>.msu` next to the ROM, from the MSU-1 pack ([`MSU1_PACK.md`](MSU1_PACK.md)). Otherwise the
@@ -111,7 +111,6 @@ SRAM chip (512 KB):
   `$3000` window (recorded traffic, random latency), SRAM bursts, MCU ↔ FPGA link (500 packets bit-exact),
   MSU-1 path (`tb_msu.v`, test-tone pack in MesenCE).
 
-## Open points (hardware)
+## Open point (hardware)
 
-1. LPC1756 firmware, with and without a pack.
-2. Reset to menu and long reset.
+1. LPC1756 firmware (`firmware.im3`), with and without a pack.
