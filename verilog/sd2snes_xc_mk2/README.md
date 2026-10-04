@@ -20,7 +20,7 @@ sound effects mixed in software; without a pack it runs without music.
 
 ## How it differs from mk3
 
-MSU-1 only. The mk3 cores (`../sd2snes_xc`, `../sd2snes_xc_msu`) don't use these files and are unchanged.
+MSU-1 only. The mk3 core (`../sd2snes_xc_mk3`) doesn't use these files.
 
 - **No mixer hardware** (tick timer, interrupts, BRR encoder removed for space; see `experiments/`). The MK2P table
   starts the mixer (`src/xc_soc/xc_mix.c`) without interrupts: the firmware's wait loops call `xc_mix_poll()`, which
@@ -57,7 +57,7 @@ The MK2P table sits after the main table, so the same `xc_soc.bin` works on mk3 
 | `xc_window.v`, `xc_stream.v` | `$3000` window |
 | `xc_top.v` | the blocks together, MSU-1 only |
 | `msu.v`, `xc_dac.v`, `xc_msubox.v` | MSU-1 audio (no data port), DAC (one channel at a time through a shared datapath), soft CPU → MSU-1 registers |
-| `address.v`, `cheat.v`, `mcu_cmd.v`, `sd_dma.v`, `spi.v` | as in `../sd2snes_xc` |
+| `address.v`, `cheat.v`, `mcu_cmd.v`, `sd_dma.v`, `spi.v` | as in `../sd2snes_xc_mk3` |
 
 Block RAM: cache data 8, cache tags 2, window rings 2, `dac_buf` 1, `snescmd_buf` 1: 14 of 16.
 
