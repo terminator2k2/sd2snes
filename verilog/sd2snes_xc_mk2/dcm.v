@@ -76,9 +76,10 @@ module my_dcm (
 endmodule
 
 //////////////////////////////////////////////////////////////////////////////////
-// Xeno Crisis mk2: second DCM for the soft CPU clock, CLKIN 24 MHz x 5 / 6 = 20 MHz
+// Xeno Crisis mk2: second DCM for the soft CPU clock, CLKIN 24 MHz x 11 / 12 = 22 MHz
 // (xc_top SOC_CLK_NUM / SOC_CLK_DEN in main.v must match). The Spartan-3 -4 reaches about 22 MHz with this core
-// (ISE: 45 ns worst path); x 5 / 3 = 40 MHz is what the mk3 core runs at.
+// (ISE: 45 ns worst path). If the soft CPU clock misses timing, go back to x 5 / 6 = 20 MHz (SOC_CLK_NUM 20), or
+// try x 9 / 10 = 21.6 MHz (SOC_CLK_NUM 108, SOC_CLK_DEN 5).
 //////////////////////////////////////////////////////////////////////////////////
 module soc_dcm (
   input CLKIN,
@@ -88,8 +89,8 @@ module soc_dcm (
 );
   DCM #(
     .SIM_MODE("SAFE"),
-    .CLKFX_DIVIDE(6),
-    .CLKFX_MULTIPLY(5),
+    .CLKFX_DIVIDE(12),
+    .CLKFX_MULTIPLY(11),
     .CLKIN_DIVIDE_BY_2("FALSE"),
     .CLKIN_PERIOD(41.667),
     .CLKOUT_PHASE_SHIFT("NONE"),
