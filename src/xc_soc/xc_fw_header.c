@@ -17,7 +17,7 @@ extern int xc_puts(), xc_printf();
 extern void xc_flash_do_cmd(), xc_flash_range_erase(), xc_flash_range_program();
 extern void xc_sdiv32(), xc_udiv32(), xc_sdiv64(), xc_udiv64();
 extern void xc_emit8(), xc_emit16(), xc_emit_lda_imm8(), xc_emit_ldx_imm16(), xc_emit_sta_dp(), xc_emit_sta_abs(), xc_emit_stx_abs(),
-	xc_emit_stz_abs();
+	xc_emit_stz_abs(), xc_tile_mark_a(), xc_tile_mark_b();
 
 #define P(addr, fn, kind) addr, (uint32_t)(fn), kind
 #define W(addr, word) addr, (uint32_t)(word), 3
@@ -26,6 +26,7 @@ extern void xc_emit8(), xc_emit16(), xc_emit_lda_imm8(), xc_emit_ldx_imm16(), xc
    anyway); A4 at a word address (8 bytes), A2 at a halfword address (12 bytes from A - 2; the halfword before
    the function must be dead code, here the rest of the function before it that has a veneer too) */
 #define A4(a, fn) W(a, 0x47184B00u), W((a) + 4, fn)                                /* ldr r3, [pc, #0]; bx r3 */
+#define R2(a, fn) W(a, 0x47104A00u), W((a) + 4, fn)                                /* ldr r2, [pc, #0]; bx r2 */
 #define A2(a, fn) W((a) - 2, 0x4B01BF00u), W((a) + 2, 0xBF004718u), W((a) + 6, fn) /* nop; ldr r3, [pc, #4]; bx r3; nop */
 /* mk2: the emitter's one-line wrappers ("push {r4, lr}; ldr r3, =builder; <movs r1, ...>; ldr r0, [r3]; bl emit;
    pop {r4, pc}"; 20 bytes with the builder's address at +16) as a tail call without the push:
@@ -36,7 +37,7 @@ extern void xc_emit8(), xc_emit16(), xc_emit_lda_imm8(), xc_emit_ldx_imm16(), xc
 #define MOVS_R1_EA 0x21EAu   /* movs r1, #0xEA (NOP) */
 
 __attribute__((section(".text.xc_header"), used))
-const uint32_t xc_fw_header[4 + 3 * 17 + 2 + 3 * 53] = {
+const uint32_t xc_fw_header[4 + 3 * 17 + 2 + 3 * 57] = {
 	0x5843584Du, 2, (uint32_t)xc_mix_install, 17,
 	P(0x10059060u, xc_mix_install, 0),        /* multicore_launch_core1 */
 	P(0x10054288u, 0, 2),                     /* set_sys_clock_pll */
@@ -58,7 +59,7 @@ const uint32_t xc_fw_header[4 + 3 * 17 + 2 + 3 * 53] = {
 	/* mk2 table: the pico-sdk divider functions -> software division (xc_div.S). These are all the entry points
 	   into the divider code from outside it; the other readers of the divider (the soft-float/double wrappers
 	   around the bootrom calls) only read DIV_CSR, which reads 0 (not dirty) on the mk2 core. */
-	0x50324B4Du, 53,                           /* "MK2P" */
+	0x50324B4Du, 57,                           /* "MK2P" */
 	P(0x10067EE8u, xc_sdiv32, 0),             /* divmod_s32s32 (__aeabi_idivmod) */
 	P(0x10067F38u, xc_udiv32, 0),             /* divmod_u32u32 (__aeabi_uidivmod) */
 	P(0x10067FB4u, xc_udiv64, 0),             /* divmod_u64u64 (__aeabi_uldivmod) */
@@ -82,4 +83,7 @@ const uint32_t xc_fw_header[4 + 3 * 17 + 2 + 3 * 53] = {
 	WRAP(0x100676B4u, MOVS_R1_R0, xc_emit_sta_abs),
 	WRAP(0x100676C8u, MOVS_R1_R0, xc_emit_stx_abs),
 	WRAP(0x100676DCu, MOVS_R1_R0, xc_emit_stz_abs),
+	/* the game's tile-flag loops (xc_tile.S): veneers on their outer loop heads, which load r2 anyway */
+	R2(0x1000BB10u, xc_tile_mark_a),
+	R2(0x1000C308u, xc_tile_mark_b),
 };

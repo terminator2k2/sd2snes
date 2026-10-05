@@ -43,16 +43,17 @@ to the 8-bit SRAM chip**, so the hot code avoids stores.
 - **BRR encoding:** only the two candidate shifts instead of all 11; 99.9% of the game's blocks come out identical
   to the firmware's, the rest with the same error. Fast mode (one shift) adds ~1 dB of noise on ~10% of the blocks.
 - **Speed-ups** (same results as the originals): the 65816 code emitter as leaf functions entered without stack
-  stores (`xc_emit.S`, code patches in the mk2 table), and `memcpy` without stack stores and with word stores for
-  any alignment (`xc_bootrom_memcpy.S`, mk3 gets it too).
+  stores (`xc_emit.S`, code patches in the mk2 table), `memcpy` without stack stores and with word stores for any
+  alignment (`xc_bootrom_memcpy.S`, mk3 gets it too), and the game's two tile-flag loops with everything in
+  registers and two entries per word store (`xc_tile.S`; identical results in 800 randomized cases).
 
 RTL simulation of the mk2 core at 22 MHz, 60 s of play:
 
 | | |
 |---|---|
-| frame message → stream post, p50 / p95 / p99 / max | 7.2 / 9.3 / 10.9 / 31.2 ms (without the speed-ups at 20 MHz: p95 11.1, max 55.9) |
-| game ticks later than one frame | 3 of 3,669 |
-| mixer | 1,492 blocks/s (as the game needs), 23% of the CPU; ring never below 32 blocks during play |
+| frame message → stream post, p50 / p95 / p99 / max | 7.2 / 9.4 / 10.7 / 29.4 ms (without the speed-ups at 20 MHz: p95 11.1, max 55.9) |
+| game ticks later than one frame | 1 of 3,670 |
+| mixer | 1,491 blocks/s (as the game needs), 21% of the CPU; ring never below 40 blocks during play |
 
 What is left in slow frames is mostly the game's own code and waiting for the SNES to read the stream. Tried and
 not kept: pausing the mixer while a SNES message waits, and mixing less while a frame is built (neither made frames
