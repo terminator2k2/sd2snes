@@ -3,7 +3,7 @@
 ISE project for the sd2snes mk2 (Spartan-3 XC3S400), laid out like the other mk2 cores (`sd2snes_xc_mk2.xise`,
 macros `MK2 | XC_MSU`). `make mk2` builds `fpga_xc_mk2.bit`; `make mk2s` runs SmartXplorer.
 
-**State: runs on hardware.** Fits and meets timing with the soft CPU at 20 MHz; the device is practically full.
+**State: runs on hardware.** Fits and meets timing with the soft CPU at 22 MHz (+0.24 ns slack); the device is practically full.
 Music comes from an MSU-1 pack (none without one), sound effects are mixed in software.
 
 ## Setup
@@ -18,8 +18,9 @@ Music comes from an MSU-1 pack (none without one), sound effects are mixed in so
 - **No mixer hardware** (tick timer, interrupts, BRR encoder). The firmware's wait loops call `xc_mix_poll()`, which
   runs the due 1 kHz ticks and mixes a block or two; sound effects are mixed and BRR-encoded in software.
 - **No hardware divider:** software division (`src/xc_soc/xc_div.S`, identical results to the originals).
-- **Speed-ups for 20 MHz:** the 65816 code emitter and `memcpy` without stack stores (every store is an SRAM write
-  here). The mk2 firmware applies these through the "MK2P" patch table; the mk3 firmware ignores it.
+- **Speed-ups:** the 65816 code emitter and `memcpy` without stack stores, and the game's tile-flag loops in
+  registers with two entries per store (`xc_tile.S`); every store is an SRAM write here. The mk2 firmware applies
+  these through the "MK2P" patch table; the mk3 firmware ignores it.
 - **Smaller soft CPU and SoC.** Anything removed halts with a fault code if reached:
 
 | Part | Change | Why it is safe |
@@ -45,6 +46,7 @@ wires now.
 
 - **Hardware:** long sessions without a halt (649,385 mixer ticks, 998 sound effects, 9 music tracks).
 - **RTL-in-the-loop** (Verilated `xc_top`, MesenCE for the SNES, 3,600 frames, every access checked): 0 mismatches;
-  frame message → stream post p50 7.3 / p99 10.9 ms (mk3: p50 6.1 ms); mixer 22% of the CPU.
+  at 22 MHz, frame message → stream post p50 7.2 / p99 10.7 / max 29.4 ms (mk3: p50 6.1 ms), 1 of 3,670 game ticks
+  late; mixer 21% of the CPU.
 - **Lockstep** with the MesenCE interpreter: 3,000 random programs and 3.13 billion instructions of gameplay, 0
   mismatches; removed instructions halt with the right fault code.
