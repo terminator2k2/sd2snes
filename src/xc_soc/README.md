@@ -45,15 +45,16 @@ to the 8-bit SRAM chip**, so the hot code avoids stores.
 - **Speed-ups** (same results as the originals): the 65816 code emitter as leaf functions entered without stack
   stores (`xc_emit.S`, code patches in the mk2 table), `memcpy` without stack stores and with word stores for any
   alignment (`xc_bootrom_memcpy.S`, mk3 gets it too), and the game's two tile-flag loops with everything in
-  registers and two entries per word store (`xc_tile.S`; identical results in 800 randomized cases).
+  registers and two entries per word store (`xc_tile.S`; identical results in 800 randomized cases). The core keeps both stacks in block RAM
+  (`verilog/sd2snes_xc_mk2/xc_scratch.v`), so stack stores don't go to the SRAM chip.
 
 RTL simulation of the mk2 core at 22 MHz, 60 s of play:
 
 | | |
 |---|---|
-| frame message → stream post, p50 / p95 / p99 / max | 7.2 / 9.4 / 10.7 / 29.4 ms (without the speed-ups at 20 MHz: p95 11.1, max 55.9) |
-| game ticks later than one frame | 1 of 3,670 |
-| mixer | 1,491 blocks/s (as the game needs), 21% of the CPU; ring never below 40 blocks during play |
+| frame message → stream post, p50 / p95 / p99 / max | 7.0 / 9.1 / 10.2 / 27.8 ms (without the speed-ups at 20 MHz: p95 11.1, max 55.9) |
+| game ticks later than one frame | 1 of 3,673 |
+| mixer | 1,492 blocks/s (as the game needs), 18% of the CPU; ring below half full 5 ms of 60 s, no fast-mode blocks |
 
 What is left in slow frames is mostly the game's own code and waiting for the SNES to read the stream. Tried and
 not kept: pausing the mixer while a SNES message waits, and mixing less while a frame is built (neither made frames
