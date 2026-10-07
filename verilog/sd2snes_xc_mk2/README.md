@@ -18,6 +18,10 @@ Music comes from an MSU-1 pack (none without one), sound effects are mixed in so
 - **No mixer hardware** (tick timer, interrupts, BRR encoder). The firmware's wait loops call `xc_mix_poll()`, which
   runs the due 1 kHz ticks and mixes a block or two; sound effects are mixed and BRR-encoded in software.
 - **No hardware divider:** software division (`src/xc_soc/xc_div.S`, identical results to the originals).
+- **Stacks in block RAM** (`xc_scratch.v`, the 2 block RAMs that were free): 0x20040800-0x20040FFF (the mixer's
+  stack) and 0x20041800-0x20041FFF (the game's stack) take one cycle and are not in the SRAM chip, so pushes don't
+  wait for the write-through. The game uses about 600 bytes of its stack, the mixer about 230. Nothing else reads
+  these addresses (no window DMA, not the MCU).
 - **Speed-ups:** the 65816 code emitter and `memcpy` without stack stores, and the game's tile-flag loops in
   registers with two entries per store (`xc_tile.S`); every store is an SRAM write here. The mk2 firmware applies
   these through the "MK2P" patch table; the mk3 firmware ignores it.
@@ -34,7 +38,7 @@ Music comes from an MSU-1 pack (none without one), sound effects are mixed in so
 | Cache | one 16 KB 2-way write-through cache | |
 | Other | no early fetch, no performance counters, no RAM clear, window queue 2 deep | |
 
-Block RAM: 14 of 16 (cache 10, window rings 2, `dac_buf`, `snescmd_buf`).
+Block RAM: 16 of 16 (cache 10, window rings 2, stacks 2, `dac_buf`, `snescmd_buf`).
 
 ## XST pitfall
 
@@ -46,7 +50,7 @@ wires now.
 
 - **Hardware:** long sessions without a halt (649,385 mixer ticks, 998 sound effects, 9 music tracks).
 - **RTL-in-the-loop** (Verilated `xc_top`, MesenCE for the SNES, 3,600 frames, every access checked): 0 mismatches;
-  at 22 MHz, frame message → stream post p50 7.2 / p99 10.7 / max 29.4 ms (mk3: p50 6.1 ms), 1 of 3,670 game ticks
-  late; mixer 21% of the CPU.
+  at 22 MHz, frame message → stream post p50 7.0 / p99 10.2 / max 27.8 ms (mk3: p50 6.1 ms), 1 of 3,673 game ticks
+  late; mixer 18% of the CPU, BRR ring below half full 5 ms of 60 s (stacks in SRAM: 1,012 ms).
 - **Lockstep** with the MesenCE interpreter: 3,000 random programs and 3.13 billion instructions of gameplay, 0
   mismatches; removed instructions halt with the right fault code.

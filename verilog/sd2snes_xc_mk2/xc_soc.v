@@ -9,7 +9,9 @@
 //     is the SRC field of CLK_REF_CTRL / CLK_SYS_CTRL, for their CLK_x_SELECTED registers (the firmware
 //     waits for SELECTED == 1 and later for its SRC bit); every other register reads 0, as the shadow did;
 //   - NVIC: only IRQ 26 (mixer tick); the MSU-1 core has no decode interrupt;
-//   - timer: TIMEHR/TIMELR read the raw counter (the firmware only reads TIMERAWH/TIMERAWL).
+//   - timer: TIMEHR/TIMELR read the raw counter (the firmware only reads TIMERAWH/TIMERAWL);
+//   - a spinlock read returns 1 (not 1 << n) when it claims the lock;
+//   - the two stacks (top halves of SCRATCH_X/Y) in block RAM (xc_scratch): stores there don't wait for the SRAM chip.
 //
 //   xc_m0 core + I-cache + write-back D-cache (2-way, 32-byte lines; sizes: parameters IIDX, DIDX), a memory controller,
 //   the SoC-local peripherals (timer, SIO subset with the hardware divider, NVIC/VTOR, BRR encoder,
@@ -24,7 +26,9 @@
 //       0xF00000 <= o < 0xF04000 (firmware additions)  PSRAM 0xD24000 + (o & 0x3FFF)
 //       o >= 0xFF8000 (save area)                      SRAM 0x00000 + (o & 0x7FFF)  uncached, writable
 //       anything else                                  reads 0xFF (erased flash)
-//   0x20000000-0x20041FFF  RAM (and the 0x21 alias)    SRAM 0x08000 + o      cached, write-back
+//   0x20000000-0x20041FFF  RAM (and the 0x21 alias)    SRAM 0x08000 + o      cached, write-through
+//       0x20040800-0x20040FFF, 0x20041800-0x20041FFF   block RAM (xc_scratch), one cycle, not in the SRAM chip:
+//         the top halves of SCRATCH_X and SCRATCH_Y, where the mixer's stack and core 0's stack are
 //   0x50100000-0x50100FFF  USB RAM                     SRAM 0x4A000 + o      uncached
 //   0x40000000-0x400FFFFF  APB                         timer local; the rest: writes ignored, fixed reads
 //   0x50800000 BRR, 0x50802000 tick/debug/panic        local
@@ -207,7 +211,8 @@ wire [3:0] cls = classify(bus_addr);
 wire [25:0] key_cur = cache_key(bus_addr);
 wire [24:0] cur_phys = key_phys(key_cur);
 wire use_ic = 1'b0;   // mk2: instruction fetches use the (only) cache
-wire use_dc = !use_ic && (cls == C_BOOT || cls == C_FLASH || cls == C_RAM);
+wire scr_cur = (cls == C_RAM) && bus_addr[18:13] == 6'h20 && bus_addr[11];   // the two stacks: block RAM
+wire use_dc = !use_ic && (cls == C_BOOT || cls == C_FLASH || (cls == C_RAM && !scr_cur));
 
 // byte lanes
 reg [3:0] be;
@@ -230,6 +235,7 @@ localparam MIDX = (DIDX > IIDX) ? DIDX : IIDX;
 reg ctl_rd;                         // controller drives the cache read address
 reg [25:0] ctl_key;
 wire [25:0] rd_key = ctl_rd ? ctl_key : bus_next_req ? cache_key(bus_next_addr) : key_cur;
+wire rd_scr = rd_key[25:24] == 2'd2 && rd_key[18:13] == 6'h20 && rd_key[11];   // the read is for xc_scratch
 
 wire [31:0] dq0, dq1, iq0, iq1;
 wire [DTAG+1:0] dt0, dt1;
@@ -249,7 +255,7 @@ reg lru_reset;
 wire d_lru_way, i_lru_way;
 
 xc_cache #(.SETS(1 << DIDX), .IDXW(DIDX), .TAGW(DTAG)) dcache (
-  .clk(clk), .rd_word(rd_key[DIDX+4:2]), .q0(dq0), .q1(dq1), .t0(dt0), .t1(dt1),
+  .clk(clk), .rd_word(rd_key[DIDX+4:2]), .rd_zero(rd_scr), .q0(dq0), .q1(dq1), .t0(dt0), .t1(dt1),
   .dwe(d_dwe), .dway(d_dway), .dword(d_dword), .dbe(d_dbe), .dwdata(d_dwdata),
   .twe(d_twe), .tway(d_tway), .tset(d_tset), .twdata(d_twdata),
   .lru_set(key_cur[DIDX+4:5]), .lru_way(d_lru_way), .touch(d_touch), .touch_set(d_touch_set), .touch_way(d_touch_way),
@@ -274,7 +280,19 @@ wire d_look = rd_match & ~d_stale;
 wire i_look = rd_match & ~i_stale;
 wire d_hit = d_look & (d_hit0 | d_hit1);
 wire i_hit = i_look & (i_hit0 | i_hit1);
-wire [31:0] d_word = d_hit1 ? dq1 : dq0;
+// stack block RAM: read with the cache's read address (rd_key), so its output belongs to rd_key_q as well.
+// Either it or the cache reads 0 (block RAM output reset with rd_scr), so the load data is an OR. A store
+// uses the cache's write registers (d_dword, d_dbe, d_dwdata) with s_wen instead of d_dwe.
+reg s_wen;
+reg s_stale;
+wire [31:0] sq;
+xc_scratch scratch (
+  .clk(clk), .raddr({rd_key[12], rd_key[10:2]}), .rd_en(rd_scr), .q(sq),
+  .we(s_wen ? d_dbe : 4'd0), .waddr({d_dword[10], d_dword[8:0]}), .wdata(d_dwdata)   // d_dword = address bits 12:2 (DIDX = 8)
+);
+always @(posedge clk) s_stale <= s_wen;
+wire s_look = rd_match & ~s_stale;
+wire [31:0] d_word = (d_hit1 ? dq1 : dq0) | sq;
 // load data: plain wires, no function. XST (ISE 14.7) built the old lane_out() function, called twice in the fast-path
 // block (cache data and 0xFFFFFFFF for erased flash), as one circuit: every byte load from the cache read 0xFF.
 // Only the low bits matter for byte and halfword loads (xc_m0 zero/sign-extends bits 7:0 or 15:0 itself), so the
@@ -354,7 +372,6 @@ wire [24:0] wb_phys = key_phys({wb_tag, wb_set, 5'd0});
 wire [24:0] vec_phys = key_phys(cache_key(32'h10000100));
 
 // uncached access
-reg [31:0] unc_data;
 reg [2:0] unc_mode;                 // 0 read, 4 write
 
 // window TX_ADDR copy (for the clean before a post) and clean range
@@ -379,6 +396,9 @@ always @* begin
     if(use_ic) begin
       fast_ready = i_hit;
       fast_rdata = i_word;
+    end else if(scr_cur) begin
+      fast_ready = bus_we | s_look;                                   // stores never wait (not in the SRAM chip)
+      fast_rdata = d_lanes;
     end else if(use_dc) begin
       if(bus_we) fast_ready = d_look & ((cls != C_RAM) | ~bg_busy);  // mk2 write-through: RAM stores are posted to the SRAM
       else fast_ready = d_hit;
@@ -418,7 +438,9 @@ always @* begin
             12'h050: fast_rdata = 32'h2;                          // FIFO_ST: RDY
             12'h05C: fast_rdata = spinlocks;
             default: begin
-              if(bus_addr[11:7] == 5'b00010) fast_rdata = spinlocks[bus_addr[6:2]] ? 32'd0 : (32'd1 << bus_addr[6:2]);
+              // spinlock: nonzero if it was free (mk2: 1 instead of the RP2040's 1 << n; the datasheet only promises
+              // nonzero, and the pico-sdk only tests for it)
+              if(bus_addr[11:7] == 5'b00010) fast_rdata = {31'd0, ~spinlocks[bus_addr[6:2]]};
               if(bus_addr[11:7] == 5'b00001) fast_ready = 1'b0;   // interpolators: halt below
               if(bus_addr[11:5] == 7'b0000011) fast_ready = 1'b0; // divider (0x060-0x07C): halt below
             end
@@ -445,6 +467,7 @@ always @(posedge clk) begin
   wb_we <= 1'b0;
   slow_ready <= 1'b0;
   d_dwe <= 1'b0; d_twe <= 1'b0; d_touch <= 1'b0;
+  s_wen <= 1'b0;
   i_dwe <= 1'b0; i_twe <= 1'b0; i_touch <= 1'b0;
   lru_reset <= 1'b0;
   dbg_char_valid <= 1'b0;
@@ -516,6 +539,8 @@ always @(posedge clk) begin
             // side effects of the accesses answered combinationally
             if(use_ic) begin
               i_touch <= 1'b1; i_touch_set <= key_cur[IIDX+4:5]; i_touch_way <= i_hit1;
+            end else if(scr_cur) begin
+              if(bus_we) begin s_wen <= 1'b1; d_dword <= key_cur[DIDX+4:2]; d_dbe <= be; d_dwdata <= wd_lanes; end
             end else if(use_dc) begin
               if(bus_we && cls == C_RAM) begin
                 // write-through, no allocate: update the line if it is cached, and always write the SRAM
@@ -559,6 +584,8 @@ always @(posedge clk) begin
                 default: ;
               endcase
             end
+          end else if(scr_cur) begin
+            // stack read after a store: the block RAM reads it again in this cycle
           end else if(bg_busy) begin
             // the deferred write-back still has the bridge
           end else if(use_ic) begin
@@ -649,11 +676,11 @@ always @(posedge clk) begin
       S_UNC: if(op_done) st <= S_UNC_RD;     // rbi = 0: result word 0 is read at the next edge
       S_UNC_RD: st <= S_UNC_RD2;
       S_UNC_RD2: begin
-        unc_data <= (bus_size == 2'd0) ? {24'd0, rbuf_word[7:0]} : (bus_size == 2'd1) ? {16'd0, rbuf_word[15:0]} : rbuf_word;
+        slow_rdata <= rbuf_word;   // xc_m0 extends byte and halfword loads itself
         st <= S_UNC_DONE;
       end
       S_UNC_DONE: begin
-        slow_ready <= 1'b1; slow_rdata <= unc_data;
+        slow_ready <= 1'b1;
         st <= S_SEL;
       end
       S_SEL: st <= S_IDLE;          // the core has taken the data; one cycle before the next request

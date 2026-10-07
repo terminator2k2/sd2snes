@@ -19,6 +19,7 @@ module xc_cache #(
 
   // read (registered outputs)
   input [IDXW+2:0] rd_word,         // {set, word in line}
+  input rd_zero,                    // data outputs read as 0 (block RAM output reset: the read is for xc_scratch)
   output [31:0] q0,
   output [31:0] q1,
   output [TAGW+1:0] t0,             // {valid, dirty, tag}
@@ -67,8 +68,12 @@ always @(posedge clk) begin
   if(dwe &  dway & dbe[1]) d11[dword] <= dwdata[15:8];
   if(dwe &  dway & dbe[2]) d12[dword] <= dwdata[23:16];
   if(dwe &  dway & dbe[3]) d13[dword] <= dwdata[31:24];
-  q00 <= d00[rd_word]; q01 <= d01[rd_word]; q02 <= d02[rd_word]; q03 <= d03[rd_word];
-  q10 <= d10[rd_word]; q11 <= d11[rd_word]; q12 <= d12[rd_word]; q13 <= d13[rd_word];
+  if(rd_zero) begin
+    q00 <= 8'd0; q01 <= 8'd0; q02 <= 8'd0; q03 <= 8'd0; q10 <= 8'd0; q11 <= 8'd0; q12 <= 8'd0; q13 <= 8'd0;
+  end else begin
+    q00 <= d00[rd_word]; q01 <= d01[rd_word]; q02 <= d02[rd_word]; q03 <= d03[rd_word];
+    q10 <= d10[rd_word]; q11 <= d11[rd_word]; q12 <= d12[rd_word]; q13 <= d13[rd_word];
+  end
 end
 
 always @(posedge clk) begin
