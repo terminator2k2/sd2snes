@@ -216,7 +216,7 @@ static int format_stats(char* b, int size)
 	return n;
 }
 
-static char stats_buf[1536] IN_AHBRAM;
+static char stats_buf[512] IN_AHBRAM;
 
 /* the load results, at the top of every xc_debug.txt */
 static int format_load(char* b, int size)

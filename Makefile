@@ -4,11 +4,11 @@ README := README*
 
 MK2MCUPATH := $(MCUSRC)/obj-mk2
 MK3MCUPATH := $(MCUSRC)/obj-mk3
-STMMCUPATH := $(MCUSRC)/obj-mk3-stm32
+
 MK2MCU := firmware.img
 MK3MCU := firmware.im3
-STMMCU := firmware.stm
-# Xeno Crisis soft CPU support file: built with each firmware (src/xc_soc), the same file for mk2 and mk3
+
+# Xeno Crisis soft CPU support file
 XCSOC := xc_soc.bin
 
 SAVESTATEPATH := savestate
@@ -21,7 +21,8 @@ MK3MENU := m3nu.bin
 FPGAPATH := verilog
 MK2EXT := bit
 MK3EXT := bi3
-# Xeno Crisis: MK2 uses xc_mk2; MK3 uses xc and xc_msu.
+
+# Xeno Crisis: MK2 uses xc_mk2; MK3 uses xc_mk3.
 # Preserve all existing Ludufre FPGA cores.
 MK2CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb sgb_msu xc_mk2
 MK3CORES := base cx4 gsu obc1 sdd1 sa1 dsp sgb st0011 st0018 col20 xc_mk3
@@ -36,7 +37,6 @@ MK2CLEAN := $(foreach C,$(MK2CORES) mini,$(FPGAPATH)/sd2snes_$C/.clean.$(MK2EXT)
 MK3CLEAN := $(foreach C,$(MK3CORES) mini,$(FPGAPATH)/sd2snes_$C/.clean.$(MK3EXT))
 
 BIN := bin
-
 UTILS := utils
 
 -include src/VERSION
@@ -65,13 +65,11 @@ build: $(MK2MINI) $(MK3MINI)
 	$(MAKE) -C snes
 	$(MAKE) -C src CONFIG=config-mk2
 	$(MAKE) -C src CONFIG=config-mk3
-	$(MAKE) -C src CONFIG=config-mk3-stm32
 
 clean: $(MK2CLEAN) $(MK3CLEAN)
 	$(MAKE) -C snes clean
 	$(MAKE) -C src clean CONFIG=config-mk2
 	$(MAKE) -C src clean CONFIG=config-mk3
-	$(MAKE) -C src clean CONFIG=config-mk3-stm32
 
 release: version bsxpage
 	rm -rf $(TARGETPARENT)
@@ -84,8 +82,7 @@ endif
 	cp $(MK3FPGA) $(TARGET)
 	cp $(MK2MCUPATH)/$(MK2MCU) $(TARGET)
 	cp $(MK3MCUPATH)/$(MK3MCU) $(TARGET)
-	cp $(STMMCUPATH)/$(STMMCU) $(TARGET)
-	cp $(STMMCUPATH)/$(XCSOC) $(TARGET)
+	cp $(MK3MCUPATH)/$(XCSOC) $(TARGET)
 	cp $(MENUPATH)/$(MK2MENU) $(TARGET)
 	cp $(MENUPATH)/$(MK3MENU) $(TARGET)
 ifneq ($(SAVESTATEPATH),)
@@ -101,35 +98,34 @@ bsxpage:
 version:
 	@echo Version: $(CONFIG_VERSION)
 
-
-# ---- ludufre PT-BR fork: mk3-only targets (no mk2 = no Xilinx ISE) ----
-# `mk3`     : full from-scratch mk3 release (FPGA cores via Quartus [Make-cached]
-#             + firmware mk3/stm32 + menu + bsxpage), assembled + zipped. Nothing
-#             from the official zip. Needs QUARTUS_ROOTDIR in the env (prepare.sh).
-# `mk3-fw`  : just menu + firmware (mk3 + stm32) — fast, for device-update
-#             iteration; skips the big FPGA cores (only needs the mini cfgware).
+# MK3 LPC1756 only: full firmware + FPGA release.
 mk3: version $(MK3FPGA) $(MK3MINI) bsxpage mk3-fw
 	rm -rf $(TARGETPARENT)
 	mkdir -p $(TARGET)
 	cp bin/*.bin $(TARGET)
+ifneq ($(README),)
 	cp $(README) $(TARGET)
+endif
 	cp $(MK3FPGA) $(TARGET)
 	cp $(MK3MCUPATH)/$(MK3MCU) $(TARGET)
-	cp $(STMMCUPATH)/$(STMMCU) $(TARGET)
-	cp $(STMMCUPATH)/$(XCSOC) $(TARGET)
+	cp $(MK3MCUPATH)/$(XCSOC) $(TARGET)
 	cp $(MENUPATH)/$(MK3MENU) $(TARGET)
 	cp $(MENUPATH)/$(MK2MENU) $(TARGET)
+	cp $(MENUPATH)/onboarding.bin $(TARGET)
+	cp $(MENUPATH)/igmenu.bin $(TARGET)
+ifneq ($(SAVESTATEPATH),)
 	cp $(SAVESTATEPATH)/$(SAVESTATEFILES) $(TARGET)
+endif
 	cd $(TARGETPARENT) && zip -r sd2snes_firmware_v$(CONFIG_VERSION).zip sd2snes
 
+# MK3 LPC1756 firmware only (no FPGA core rebuild).
 mk3-fw: $(MK3MINI)
 	mkdir -p $(TARGET)
 	$(MAKE) -C snes
 	$(MAKE) -C src CONFIG=config-mk3
-	$(MAKE) -C src CONFIG=config-mk3-stm32
 	cp $(MK3MCUPATH)/$(MK3MCU) $(TARGET)
-	cp $(STMMCUPATH)/$(STMMCU) $(TARGET)
-	cp $(STMMCUPATH)/$(XCSOC) $(TARGET)
+	cp $(MK3MCUPATH)/$(XCSOC) $(TARGET)
+	
 
 mk2-fw:
 	mkdir -p $(TARGET)
@@ -138,6 +134,4 @@ mk2-fw:
 	cp $(MK2MCUPATH)/$(MK2MCU) $(TARGET)
 	cp $(MK2MCUPATH)/$(XCSOC) $(TARGET)
 
-
-
-.PHONY: version release bsxpage mk3 mk3-fw mk2-fw $(MK2FPGA) $(MK3FPGA) $(MK2MINI) $(MK3MINI) $(MK2CLEAN) $(MK3CLEAN)
+.PHONY: all fpga build clean version release bsxpage mk3 mk3-fw mk2-fw

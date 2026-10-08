@@ -1714,14 +1714,10 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   }
 #ifdef XC_SUPPORT
   if(romprops.has_xc) {
-    /* The Xeno Crisis soft CPU drives MSU-1, not the SNES. */
+    /* Xeno soft CPU drives MSU-1, not the SNES. */
     romprops.fpga_features &= ~FEAT_MSU1;
-
 #ifndef CONFIG_MK2
-    /* MK3: without the Xeno MSU FPGA core, disable MSU-1. */
-    if(romprops.fpga_conf != FPGA_XC_MSU) {
-      romprops.has_msu1 = 0;
-    }
+    if(!xc_msu_music()) romprops.has_msu1 = 0;
 #endif
   }
 #endif
