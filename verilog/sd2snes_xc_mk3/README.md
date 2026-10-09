@@ -15,7 +15,8 @@ and plays the sound effects only.
 
 1. `make` here (Quartus project `sd2snes_xc_mk3.qpf`, self-contained) builds `fpga_xc_mk3.bi3`.
 2. `make CONFIG=config-mk3-stm32` / `config-mk3` builds the firmware and **`xc_soc.bin`**; both go to `/sd2snes/`
-   and **must be from the same build**.
+   and **must be from the same build**. `make CONFIG=config-mk3-stm32 XC_NO_OPUS=1` leaves out the Opus decoder
+   (about 56 KB smaller): music only from an MSU-1 pack.
 3. Put the RP2040 flash dump in `/sd2snes/xenocrisis_rp2040.bin` (16 MB) and load the SNES ROM (`XENOCRISIS`, 128 KB,
    CRC32 `FE5B38F0`). Without a `.srm`, the cartridge's saves carry over from the dump. `/sd2snes/xc_debug.txt` has
    the load results and statistics.
