@@ -29,8 +29,8 @@
  */
 #include <string.h>
 #include "config.h"
-#if defined(CONFIG_MK3_STM32) && !defined(XC_MSU_DIAG)
-#define XC_OPUS 1    /* the Opus decoder (firmware.stm; not in the MSU-1 diagnostic build) */
+#if defined(CONFIG_MK3_STM32) && !defined(XC_MSU_DIAG) && !defined(XC_NO_OPUS)
+#define XC_OPUS 1    /* the Opus decoder (firmware.stm; not with make XC_NO_OPUS=1 or in the MSU-1 diagnostic build) */
 #endif
 #include "fpga_spi.h"
 #include "xc_audio.h"
