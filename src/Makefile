@@ -109,8 +109,10 @@ SRC += xc_audio.c xc_load.c
 endif
 # make XC_MSU_DIAG=1: diagnostic build for the MSU-1 core (xcaudio.txt from msu1_loop), without the Opus decoder
 # (it would not fit next to it in the STM32's flash; the MSU-1 core does not use it). Not for normal use.
+# make XC_NO_OPUS=1: firmware.stm without the Opus decoder (about 56 KB less flash, 30 KB less RAM): the music
+# comes only from an MSU-1 pack; without one, sound effects only (as firmware.im3).
 ifeq ($(CONFIG_MK3_STM32),y)
-ifeq ($(XC_MSU_DIAG),)
+ifeq ($(XC_MSU_DIAG)$(XC_NO_OPUS),)
 XC_OPUS_DIR ?= xc_opus
 XC_OPUS_LIB = $(XC_OPUS_DIR)/libopus_xc.a
 endif
@@ -167,6 +169,9 @@ CSTANDARD = -std=gnu99
 CDEFS = -DF_OSC=$(CONFIG_MCU_FOSC)UL
 ifneq ($(XC_MSU_DIAG),)
 CDEFS += -DXC_MSU_DIAG
+endif
+ifneq ($(XC_NO_OPUS),)
+CDEFS += -DXC_NO_OPUS
 endif
 
 # Place -I options here
@@ -396,6 +401,13 @@ $(OBJDIR)/$(CONFIG_FW_FILE): $(TARGET).elf
 	cat $^ > $(OBJDIR)/$(CONFIG_FW_FILE)
 
 # Compile: create object files from C source files.
+# Xeno Crisis build options (XC_NO_OPUS, XC_MSU_DIAG): the files that use them are rebuilt when they change
+XC_OPT_STAMP := $(OBJDIR)/xc_opt_$(if $(XC_NO_OPUS),noopus)$(if $(XC_MSU_DIAG),diag).stamp
+$(XC_OPT_STAMP): | $(OBJDIRS)
+	$(Q)$(REMOVE) $(OBJDIR)/xc_opt_*.stamp
+	$(Q)touch $@
+$(OBJDIR)/xc_audio.o $(OBJDIR)/msu1.o: $(XC_OPT_STAMP)
+
 $(OBJDIR)/%.o : %.c | $(OBJDIRS) $(OBJDIR)/autoconf.h $(OBJDIR)/cfgware.h $(OBJDIR)/version.h
 	$(E) "  CC     $<"
 	$(Q)$(CC) -c $(ALL_CFLAGS) $< -o $@
