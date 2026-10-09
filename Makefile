@@ -65,6 +65,8 @@ build: $(MK2MINI) $(MK3MINI)
 	$(MAKE) -C snes
 	$(MAKE) -C src CONFIG=config-mk2
 	$(MAKE) -C src CONFIG=config-mk3
+	$(MAKE) -C src CONFIG=config-mk3-stm32 XC_NO_OPUS=1
+
 
 clean: $(MK2CLEAN) $(MK3CLEAN)
 	$(MAKE) -C snes clean
@@ -123,6 +125,8 @@ mk3-fw: $(MK3MINI)
 	mkdir -p $(TARGET)
 	$(MAKE) -C snes
 	$(MAKE) -C src CONFIG=config-mk3
+	$(MAKE) -C src CONFIG=config-mk3-stm32 XC_NO_OPUS=1
+
 	cp $(MK3MCUPATH)/$(MK3MCU) $(TARGET)
 	cp $(MK3MCUPATH)/$(XCSOC) $(TARGET)
 	
